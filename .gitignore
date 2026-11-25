@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.claude/
+
+CLAUDE.md
+INTERN.md
+SECURITY-ANALYSE-*.md

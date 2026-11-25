@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netbox-proxmox"
+version = "0.1.0"
+description = "NetBox plugin importing and syncing Proxmox VE clusters, nodes, VMs and LXC containers (incl. disks, interfaces, MAC and IP addresses, utilization) via the Proxmox API."
+authors = [{ name = "Carsten Viell" }]
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = ["requests>=2.32.0"]
+
+[project.urls]
+Homepage = "https://github.com/carstenviell/netbox-proxmox"
+Repository = "https://github.com/carstenviell/netbox-proxmox"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["netbox_proxmox*"]
+
+[tool.setuptools.package-data]
+"netbox_proxmox" = ["templates/**/*", "locale/**/*"]
+
+[tool.setuptools]
+include-package-data = true

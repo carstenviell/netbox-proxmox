@@ -1,0 +1,161 @@
+**English** | [Deutsch](README.de.md)
+
+# NetBox Proxmox
+
+[NetBox](https://github.com/netbox-community/netbox) plugin that imports and keeps in sync **Proxmox VE** clusters,
+nodes, virtual machines (QEMU) and containers (LXC) via the Proxmox API – including disks, network interfaces,
+MAC and IP addresses and a daily usage snapshot.
+
+## Features
+
+- **Multiple Proxmox connections** (one per cluster or standalone node), each with *Test connection* and *Sync now*.
+- **Cluster** → NetBox cluster (type *Proxmox VE*), found by name or created.
+- **Nodes** → devices in that cluster: status, platform *Proxmox VE x.y*, interfaces (bridges, bonds, VLANs) with IPs,
+  primary IP. Missing nodes are created with the defaults of the connection (site, role, device type).
+- **VMs and containers** → virtual machines:
+  - Cluster plus the **node they run on** (`device`). Migrations inside the cluster are followed on every sync.
+    The site and location come from the node device.
+  - Status, VM type *Proxmox QEMU* / *Proxmox LXC*, vCPUs, memory, start on boot, platform (from `ostype`),
+    serial (SMBIOS UUID), Proxmox tags (added, never removed).
+  - Virtual disks with size.
+  - Interfaces `net0…` with MAC address, MTU, enabled state, bridge, and untagged VLAN (only if exactly one
+    matching VLAN exists).
+  - IP addresses from the QEMU guest agent or the LXC runtime (stopped containers: static IPs from the config).
+- **Matching:** stored link (VMID) → unique name → create. Existing objects are matched by name and updated, never
+  duplicated. If a name is ambiguous, the object is left alone and reported.
+- **The Proxmox VMID is stored** in the plugin's link table (key: connection + VMID, because VMIDs are only unique
+  per cluster). It is also shown in the read-only custom field `proxmox_vmid` on VMs. The link survives renames
+  and migrations.
+- **Proxmox is authoritative** for the fields above. Tenant, description, comments, other tags and custom fields
+  stay untouched. Role and tenant are only set when an object is created.
+- **IP addresses:** an existing IP (same address, global VRF) is reused instead of duplicated. IPs assigned to
+  another object are skipped. IPs no longer reported are unassigned, never deleted. Primary IPv4/IPv6 is only
+  set when it is empty.
+- **Gone from Proxmox:** objects are set to *offline* and marked *stale* in the sync overview – never deleted.
+- **Usage snapshot** (daily): CPU %, memory and storage used/total per node, VM and container, plus the cluster
+  total (shared storage counted once). It is shown in a *Proxmox* card on devices, VMs and clusters, next to
+  the resources allocated to active VMs.
+- **Changelog:** all changes appear in the NetBox changelog. Scheduled runs use the inactive service user
+  `proxmox-sync`, manual runs the user who started them.
+- **Sync overview** with filters (connection, type, state) to clean up *ambiguous*, *error* and *stale* entries.
+- Read-only: the plugin never writes to Proxmox.
+
+## Requirements
+
+- NetBox 4.7 or later
+- Proxmox VE 7/8/9 with an API token
+
+## Installation
+
+The plugin is not published on PyPI. Install it from the GitHub release archive – this works without `git`,
+also in the netbox-docker image. Replace `v0.1.0` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
+
+**NetBox installed from source (systemd):**
+
+```bash
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.0.tar.gz
+
+# keep the plugin when NetBox is upgraded (upgrade.sh reinstalls local_requirements.txt)
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+```
+
+**netbox-docker:** add to `plugin_requirements.txt`
+
+```text
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.0.tar.gz
+```
+
+and to `Dockerfile-Plugins` (build `netbox`, `netbox-worker` and `netbox-housekeeping` from it via `docker-compose.override.yml`):
+
+```dockerfile
+FROM netboxcommunity/netbox:v4.7
+COPY ./plugin_requirements.txt /opt/netbox/
+RUN /usr/local/bin/uv pip install -r /opt/netbox/plugin_requirements.txt
+```
+
+Enable the plugin in `configuration.py` (Docker: `configuration/plugins.py`):
+
+```python
+PLUGINS = [
+    # ...
+    'netbox_proxmox',
+]
+```
+
+Apply the migrations and restart **both** services:
+
+```bash
+cd /opt/netbox/netbox
+sudo /opt/netbox/venv/bin/python manage.py migrate
+sudo systemctl restart netbox netbox-rq
+```
+
+Docker: `docker compose build --no-cache && docker compose up -d` – migrations run automatically at start.
+
+## Configuration
+
+Optional settings (this is the default, in minutes):
+
+```python
+PLUGINS_CONFIG = {
+    "netbox_proxmox": {
+        "sync_interval_min": 1440,
+    },
+}
+```
+
+**Proxmox API token** (read-only):
+
+```bash
+pveum user add netbox@pve
+pveum aclmod / -user netbox@pve -role PVEAuditor
+pveum user token add netbox@pve sync --privsep 0
+```
+
+`PVEAuditor` is enough for inventory and usage. VM IP addresses come from the QEMU guest agent and additionally
+need `VM.GuestAgent.Audit` (Proxmox VE 9) or `VM.Monitor` (Proxmox VE 8). Example: a custom role with
+`VM.GuestAgent.Audit` on `/vms`.
+
+**Token secret:** it is never stored in the database. Provide it as an environment variable whose name starts
+with `PROXMOX_` (default `PROXMOX_TOKEN_SECRET`, one variable per connection if needed). Set it for **both** the
+web service and the worker (Docker: `env/netbox.env`; systemd: `systemctl edit netbox` and `netbox-rq`,
+`Environment=PROXMOX_TOKEN_SECRET=…` under `[Service]`, then `daemon-reload` and restart. In systemd, `%` must
+be written as `%%`).
+
+**Connection** (*Plugins → Proxmox connections → Add*, superusers only):
+- API URL (`https://host:8006`), token ID (`user@realm!tokenname`), the name of the secret variable, and TLS
+  verification or a CA bundle path.
+- Defaults for new objects: site (also the scope of a new cluster), node role, node device type, VM role,
+  container role, tenant.
+
+## Usage
+
+- *Test connection* on the connection page shows the Proxmox VE version.
+- *Sync now* starts a sync of this connection as a background job (log under *Jobs*). The system job syncs all
+  enabled connections every `sync_interval_min` minutes.
+- *Plugins → Proxmox sync overview* lists every Proxmox object with its NetBox object, state and usage.
+  Typical follow-ups:
+  - *ambiguous*: rename or merge the duplicate NetBox objects; the next sync links them.
+  - *error*: the message shows the validation error (e.g. node device at another site than the cluster).
+  - *stale*: the object no longer exists in Proxmox – decommission or delete it in NetBox.
+
+## Permissions
+
+| Action | Permission |
+|---|---|
+| View connections | `netbox_proxmox.view_proxmoxconnection` |
+| Add/edit/delete connections, test connection | **Superuser** (the connection decides where the token is sent) |
+| View sync overview and *Proxmox* cards | `netbox_proxmox.view_proxmoxobject` |
+| *Sync now* | `netbox_proxmox.change_proxmoxobject` |
+
+## Language
+
+The UI is in English with a German translation. NetBox uses the language of the user's profile (or browser).
+
+## Upgrade
+
+Install the new release archive (see Installation), run `manage.py migrate` and restart `netbox` and `netbox-rq`.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE).

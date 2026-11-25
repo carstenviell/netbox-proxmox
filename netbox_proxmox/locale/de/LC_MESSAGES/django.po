@@ -1,0 +1,434 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: netbox-proxmox\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-25 04:49+0000\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: client.py:37
+#, python-format
+msgid "Environment variable %(name)s is not set."
+msgstr "Umgebungsvariable %(name)s ist nicht gesetzt."
+
+#: client.py:56
+#, python-format
+msgid "Response is not JSON (HTTP %(code)s)"
+msgstr "Antwort ist kein JSON (HTTP %(code)s)"
+
+#: custom_fields.py:16
+msgid "Proxmox VMID"
+msgstr "Proxmox-VMID"
+
+#: custom_fields.py:16
+msgid "Set by the Proxmox sync"
+msgstr "Wird vom Proxmox-Abgleich gesetzt"
+
+#: forms.py:14 views.py:51
+msgid "Site"
+msgstr "Standort"
+
+#: forms.py:15 views.py:52
+msgid "Node role"
+msgstr "Node-Rolle"
+
+#: forms.py:16 views.py:53
+msgid "Node device type"
+msgstr "Node-Gerätetyp"
+
+#: forms.py:17 models.py:57 views.py:54
+msgid "VM role"
+msgstr "VM-Rolle"
+
+#: forms.py:19 views.py:55
+msgid "Container role"
+msgstr "Container-Rolle"
+
+#: forms.py:21 views.py:56
+msgid "Tenant"
+msgstr "Mandant"
+
+#: forms.py:26 forms.py:47 templates/netbox_proxmox/panel.html:5
+msgid "Connection"
+msgstr "Verbindung"
+
+#: forms.py:28 views.py:65
+msgid "Defaults for new objects"
+msgstr "Standardwerte für neue Objekte"
+
+#: forms.py:29
+msgid "Other"
+msgstr "Sonstiges"
+
+#: forms.py:44
+msgid "Search"
+msgstr "Suche"
+
+#: forms.py:48 templates/netbox_proxmox/panel.html:7
+msgid "Type"
+msgstr "Typ"
+
+#: forms.py:49 templates/netbox_proxmox/panel.html:13
+msgid "State"
+msgstr "Zustand"
+
+#: models.py:17
+msgid "Only https:// URLs are allowed."
+msgstr "Nur https://-URLs sind erlaubt."
+
+#: models.py:24
+#, python-format
+msgid "The variable name must start with %(p)s (A-Z, 0-9, _)."
+msgstr "Der Variablenname muss mit %(p)s beginnen (A-Z, 0-9, _)."
+
+#: models.py:29
+msgid "Format: user@realm!tokenname"
+msgstr "Format: benutzer@realm!tokenname"
+
+#: models.py:35
+msgid "name"
+msgstr "Name"
+
+#: models.py:36 views.py:40
+msgid "API URL"
+msgstr "API-URL"
+
+#: models.py:37
+msgid "e.g. https://pve01.example.local:8006"
+msgstr "z. B. https://pve01.example.local:8006"
+
+#: models.py:38 views.py:41
+msgid "API token ID"
+msgstr "API-Token-ID"
+
+#: models.py:39
+msgid "user@realm!tokenname"
+msgstr "benutzer@realm!tokenname"
+
+#: models.py:40
+msgid "token secret environment variable"
+msgstr "Umgebungsvariable für das Token-Secret"
+
+#: models.py:42
+msgid "Must start with PROXMOX_"
+msgstr "Muss mit PROXMOX_ beginnen"
+
+#: models.py:43
+msgid "verify TLS"
+msgstr "TLS prüfen"
+
+#: models.py:44
+msgid "CA bundle path"
+msgstr "Pfad zum CA-Bundle"
+
+#: models.py:45
+msgid "timeout (s)"
+msgstr "Timeout (s)"
+
+#: models.py:46
+msgid "enabled"
+msgstr "aktiv"
+
+#: models.py:47
+msgid "Included in the scheduled sync"
+msgstr "Wird beim geplanten Abgleich berücksichtigt"
+
+#: models.py:50
+msgid "site"
+msgstr "Standort"
+
+#: models.py:51
+msgid "Site of the cluster and of new nodes"
+msgstr "Standort des Clusters und neuer Nodes"
+
+#: models.py:53
+msgid "node role"
+msgstr "Node-Rolle"
+
+#: models.py:55
+msgid "node device type"
+msgstr "Node-Gerätetyp"
+
+#: models.py:57 models.py:60 models.py:62
+msgid "Only set on creation"
+msgstr "Nur beim Anlegen gesetzt"
+
+#: models.py:59
+msgid "container role"
+msgstr "Container-Rolle"
+
+#: models.py:62
+msgid "tenant"
+msgstr "Mandant"
+
+#: models.py:64
+msgid "cluster"
+msgstr "Cluster"
+
+#: models.py:65
+msgid "Set by the first sync (found by name or created)"
+msgstr "Wird beim ersten Abgleich gesetzt (per Name gefunden oder angelegt)"
+
+#: models.py:66
+msgid "description"
+msgstr "Beschreibung"
+
+#: models.py:67
+msgid "comments"
+msgstr "Kommentare"
+
+#: models.py:68
+msgid "last sync"
+msgstr "letzter Abgleich"
+
+#: models.py:72
+msgid "Proxmox connection"
+msgstr "Proxmox-Verbindung"
+
+#: models.py:73 navigation.py:6
+msgid "Proxmox connections"
+msgstr "Proxmox-Verbindungen"
+
+#: models.py:85 views.py:45
+msgid "Cluster"
+msgstr "Cluster"
+
+#: models.py:85 templates/netbox_proxmox/panel.html:10
+msgid "Node"
+msgstr "Node"
+
+#: models.py:85
+msgid "VM (QEMU)"
+msgstr "VM (QEMU)"
+
+#: models.py:85
+msgid "Container (LXC)"
+msgstr "Container (LXC)"
+
+#: models.py:87
+msgid "In sync"
+msgstr "Abgeglichen"
+
+#: models.py:88
+msgid "Created"
+msgstr "Angelegt"
+
+#: models.py:89
+msgid "Ambiguous"
+msgstr "Mehrdeutig"
+
+#: models.py:90
+msgid "Error"
+msgstr "Fehler"
+
+#: models.py:91
+msgid "Gone from Proxmox"
+msgstr "In Proxmox entfernt"
+
+#: models.py:95
+msgid "connection"
+msgstr "Verbindung"
+
+#: models.py:96
+msgid "type"
+msgstr "Typ"
+
+#: models.py:97
+msgid "Proxmox ID"
+msgstr "Proxmox-ID"
+
+#: models.py:98
+msgid "VMID, node name or cluster name"
+msgstr "VMID, Node-Name oder Cluster-Name"
+
+#: models.py:99
+msgid "name in Proxmox"
+msgstr "Name in Proxmox"
+
+#: models.py:100
+msgid "node"
+msgstr "Node"
+
+#: models.py:105
+msgid "state"
+msgstr "Zustand"
+
+#: models.py:106
+msgid "message"
+msgstr "Meldung"
+
+#: models.py:107
+msgid "last seen"
+msgstr "zuletzt gesehen"
+
+#: models.py:110
+msgid "CPU usage (%)"
+msgstr "CPU-Auslastung (%)"
+
+#: models.py:111
+msgid "CPUs"
+msgstr "CPUs"
+
+#: models.py:112
+msgid "memory used"
+msgstr "RAM belegt"
+
+#: models.py:113
+msgid "memory total"
+msgstr "RAM gesamt"
+
+#: models.py:114
+msgid "disk used"
+msgstr "Speicher belegt"
+
+#: models.py:115
+msgid "disk total"
+msgstr "Speicher gesamt"
+
+#: models.py:116
+msgid "uptime (s)"
+msgstr "Laufzeit (s)"
+
+#: models.py:122
+msgid "Proxmox object"
+msgstr "Proxmox-Objekt"
+
+#: models.py:123 views.py:68
+msgid "Proxmox objects"
+msgstr "Proxmox-Objekte"
+
+#: navigation.py:8
+msgid "Add"
+msgstr "Hinzufügen"
+
+#: navigation.py:10
+msgid "Proxmox sync overview"
+msgstr "Proxmox-Sync-Übersicht"
+
+#: sync.py:212
+#, python-format
+msgid "%(owner)s: %(ip)s is already assigned to %(other)s – skipped."
+msgstr "%(owner)s: %(ip)s ist bereits %(other)s zugewiesen – übersprungen."
+
+#: sync.py:244
+#, python-format
+msgid "%(n)d NetBox objects named %(name)s – assign manually or rename."
+msgstr "%(n)d NetBox-Objekte heißen %(name)s – manuell zuordnen oder umbenennen."
+
+#: sync.py:318
+#, python-format
+msgid "Creating cluster %(name)s"
+msgstr "Lege Cluster %(name)s an"
+
+#: sync.py:353
+#, python-format
+msgid "Creating device %(name)s"
+msgstr "Lege Gerät %(name)s an"
+
+#: sync.py:402
+#, python-format
+msgid "Creating virtual machine %(name)s"
+msgstr "Lege virtuelle Maschine %(name)s an"
+
+#: sync.py:407
+#, python-format
+msgid "%(name)s moved from %(old)s to %(new)s"
+msgstr "%(name)s von %(old)s nach %(new)s verschoben"
+
+#: sync.py:426
+#, python-format
+msgid ""
+"%(name)s: node %(node)s is not linked to a device in cluster %(cluster)s – "
+"host assignment unchanged."
+msgstr "%(name)s: Node %(node)s ist mit keinem Gerät im Cluster %(cluster)s verknüpft – Host-Zuordnung unverändert."
+
+#: sync.py:493
+msgid "No longer present in Proxmox"
+msgstr "In Proxmox nicht mehr vorhanden"
+
+#: tables.py:36
+msgid "NetBox object"
+msgstr "NetBox-Objekt"
+
+#: tables.py:39
+msgid "Memory"
+msgstr "RAM"
+
+#: tables.py:40
+msgid "Disk"
+msgstr "Speicher"
+
+#: templates/netbox_proxmox/panel.html:11
+msgid "Location"
+msgstr "Location"
+
+#: templates/netbox_proxmox/panel.html:14
+msgid "Last seen"
+msgstr "Zuletzt gesehen"
+
+#: templates/netbox_proxmox/panel.html:15
+msgid "CPU usage"
+msgstr "CPU-Auslastung"
+
+#: templates/netbox_proxmox/panel.html:15
+#, python-format
+msgid "of %(n)s CPUs"
+msgstr "von %(n)s CPUs"
+
+#: templates/netbox_proxmox/panel.html:16
+msgid "Memory used"
+msgstr "RAM belegt"
+
+#: templates/netbox_proxmox/panel.html:17
+msgid "Storage used"
+msgstr "Speicher belegt"
+
+#: templates/netbox_proxmox/panel.html:19
+msgid "Allocated to active VMs"
+msgstr "Zugewiesen an aktive VMs"
+
+#: templates/netbox_proxmox/panel.html:19
+msgid "disk"
+msgstr "Disk"
+
+#: templates/netbox_proxmox/proxmoxconnection.html:7
+msgid "Test connection"
+msgstr "Verbindung testen"
+
+#: templates/netbox_proxmox/proxmoxconnection.html:13
+msgid "Sync now"
+msgstr "Jetzt abgleichen"
+
+#: views.py:42
+msgid "Token secret variable"
+msgstr "Variable für das Token-Secret"
+
+#: views.py:43
+msgid "Verify TLS"
+msgstr "TLS prüfen"
+
+#: views.py:44
+msgid "Enabled"
+msgstr "Aktiv"
+
+#: views.py:46
+msgid "Last sync"
+msgstr "Letzter Abgleich"
+
+#: views.py:97
+#, python-format
+msgid "Connection failed: %(err)s"
+msgstr "Verbindung fehlgeschlagen: %(err)s"
+
+#: views.py:99
+#, python-format
+msgid "Connected, Proxmox VE %(version)s."
+msgstr "Verbunden, Proxmox VE %(version)s."
+
+#: views.py:109
+#, python-format
+msgid "Sync of %(name)s enqueued."
+msgstr "Abgleich von %(name)s eingereiht."

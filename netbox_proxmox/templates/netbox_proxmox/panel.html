@@ -1,0 +1,22 @@
+{% load i18n helpers humanize %}
+<div class="card">
+  <h2 class="card-header">Proxmox</h2>
+  <table class="table table-hover attr-table mb-0">
+    <tr><th scope="row">{% trans "Connection" %}</th><td>{{ link.connection|linkify }}</td></tr>
+    {% if link.kind != 'cluster' %}
+      <tr><th scope="row">{% trans "Type" %}</th><td>{{ link.get_kind_display }} <code class="small">{{ link.proxmox_id }}</code></td></tr>
+    {% endif %}
+    {% if link.kind == 'qemu' or link.kind == 'lxc' %}
+      <tr><th scope="row">{% trans "Node" %}</th><td>{{ object.device|linkify|placeholder }}</td></tr>
+      <tr><th scope="row">{% trans "Location" %}</th><td>{{ object.device.location|linkify|placeholder }}</td></tr>
+    {% endif %}
+    <tr><th scope="row">{% trans "State" %}</th><td>{{ link.get_state_display }}{% if link.message %}<div class="small text-muted">{{ link.message }}</div>{% endif %}</td></tr>
+    <tr><th scope="row">{% trans "Last seen" %}</th><td>{{ link.last_seen|placeholder }}</td></tr>
+    <tr><th scope="row">{% trans "CPU usage" %}</th><td>{% if link.cpu_usage is not None %}{{ link.cpu_usage }} %{% if link.cpu_count %} {% blocktrans with n=link.cpu_count %}of {{ n }} CPUs{% endblocktrans %}{% endif %}{% else %}—{% endif %}</td></tr>
+    <tr><th scope="row">{% trans "Memory used" %}</th><td>{% if link.mem_total %}{{ link.mem_used|filesizeformat }} / {{ link.mem_total|filesizeformat }} ({% widthratio link.mem_used link.mem_total 100 %} %){% else %}—{% endif %}</td></tr>
+    <tr><th scope="row">{% trans "Storage used" %}</th><td>{% if link.disk_total %}{{ link.disk_used|filesizeformat }} / {{ link.disk_total|filesizeformat }} ({% widthratio link.disk_used link.disk_total 100 %} %){% else %}—{% endif %}</td></tr>
+    {% if allocated %}
+      <tr><th scope="row">{% trans "Allocated to active VMs" %}</th><td>{{ allocated.vcpus|default:0|floatformat }} vCPU, {{ allocated.memory|default:0|intcomma }} MB RAM, {{ allocated.disk|default:0|intcomma }} MB {% trans "disk" %}</td></tr>
+    {% endif %}
+  </table>
+</div>
