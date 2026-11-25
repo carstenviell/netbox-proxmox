@@ -14,3 +14,12 @@
     </form>
   {% endif %}
 {% endblock %}
+{% block alerts %}
+  {{ block.super }}
+  {% if not object.verify_tls and not object.ca_bundle %}
+    <div class="alert alert-warning" role="alert">
+      <i class="mdi mdi-alert"></i>
+      {% trans "TLS certificate verification is off: anyone in the network path could intercept the API token. Set a CA bundle (e.g. the Proxmox CA /etc/pve/pve-root-ca.pem) and enable verification." %}
+    </div>
+  {% endif %}
+{% endblock %}

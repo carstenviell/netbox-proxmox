@@ -42,11 +42,16 @@ class ProxmoxClient:
         url = self.base + ''.join('/' + quote(str(p), safe='') for p in parts)
         for attempt in range(2):
             try:
-                resp = requests.get(url, headers=self.headers, verify=self.verify, timeout=self.timeout)
+                # no redirects: the Proxmox API never redirects, and a redirect could point the client at internal hosts
+                resp = requests.get(url, headers=self.headers, verify=self.verify, timeout=self.timeout,
+                                    allow_redirects=False)
                 break
             except requests.RequestException as exc:
                 if attempt:
                     raise ProxmoxError(str(exc))
+        if resp.is_redirect:
+            raise ProxmoxError(_('Redirect to %(location)s refused.') % {'location': resp.headers.get('Location', '?')},
+                               status=resp.status_code)
         if resp.status_code >= 400:
             # Proxmox puts the reason into the status line, e.g. "500 QEMU guest agent is not running"
             raise ProxmoxError(f'HTTP {resp.status_code}: {resp.reason or resp.text[:200]}', status=resp.status_code)

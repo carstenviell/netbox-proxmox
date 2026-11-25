@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: netbox-proxmox\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-25 04:49+0000\n"
+"POT-Creation-Date: 2026-11-25 15:37+0000\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -14,7 +14,12 @@ msgstr ""
 msgid "Environment variable %(name)s is not set."
 msgstr "Umgebungsvariable %(name)s ist nicht gesetzt."
 
-#: client.py:56
+#: client.py:53
+#, python-format
+msgid "Redirect to %(location)s refused."
+msgstr "Weiterleitung nach %(location)s abgelehnt."
+
+#: client.py:61
 #, python-format
 msgid "Response is not JSON (HTTP %(code)s)"
 msgstr "Antwort ist kein JSON (HTTP %(code)s)"
@@ -308,44 +313,64 @@ msgstr "Hinzufügen"
 msgid "Proxmox sync overview"
 msgstr "Proxmox-Sync-Übersicht"
 
-#: sync.py:212
+#: sync.py:205
+#, python-format
+msgid ""
+"%(obj)s: tag %(tag)s exists in NetBox and is not managed by the Proxmox sync "
+"– skipped."
+msgstr "%(obj)s: Tag %(tag)s existiert in NetBox und wird nicht vom Proxmox-Abgleich verwaltet – übersprungen."
+
+#: sync.py:227
+#, python-format
+msgid "%(owner)s: %(ip)s is documented as %(status)s in NetBox – not assigned."
+msgstr "%(owner)s: %(ip)s ist in NetBox als %(status)s dokumentiert – nicht zugewiesen."
+
+#: sync.py:232
 #, python-format
 msgid "%(owner)s: %(ip)s is already assigned to %(other)s – skipped."
 msgstr "%(owner)s: %(ip)s ist bereits %(other)s zugewiesen – übersprungen."
 
-#: sync.py:244
+#: sync.py:266
 #, python-format
 msgid "%(n)d NetBox objects named %(name)s – assign manually or rename."
-msgstr "%(n)d NetBox-Objekte heißen %(name)s – manuell zuordnen oder umbenennen."
+msgstr ""
+"%(n)d NetBox-Objekte heißen %(name)s – manuell zuordnen oder umbenennen."
 
-#: sync.py:318
+#: sync.py:340
 #, python-format
 msgid "Creating cluster %(name)s"
 msgstr "Lege Cluster %(name)s an"
 
-#: sync.py:353
+#: sync.py:376
 #, python-format
 msgid "Creating device %(name)s"
 msgstr "Lege Gerät %(name)s an"
 
-#: sync.py:402
+#: sync.py:426
 #, python-format
 msgid "Creating virtual machine %(name)s"
 msgstr "Lege virtuelle Maschine %(name)s an"
 
-#: sync.py:407
+#: sync.py:431
 #, python-format
 msgid "%(name)s moved from %(old)s to %(new)s"
 msgstr "%(name)s von %(old)s nach %(new)s verschoben"
 
-#: sync.py:426
+#: sync.py:450
 #, python-format
 msgid ""
 "%(name)s: node %(node)s is not linked to a device in cluster %(cluster)s – "
 "host assignment unchanged."
-msgstr "%(name)s: Node %(node)s ist mit keinem Gerät im Cluster %(cluster)s verknüpft – Host-Zuordnung unverändert."
+msgstr ""
+"%(name)s: Node %(node)s ist mit keinem Gerät im Cluster %(cluster)s "
+"verknüpft – Host-Zuordnung unverändert."
 
-#: sync.py:493
+#: sync.py:506
+#, python-format
+msgid "%(vm)s %(iface)s: %(n)d IP addresses reported, only %(limit)d taken."
+msgstr "%(vm)s %(iface)s: %(n)d IP-Adressen gemeldet, nur %(limit)d übernommen."
+
+#: sync.py:523
 msgid "No longer present in Proxmox"
 msgstr "In Proxmox nicht mehr vorhanden"
 
@@ -401,6 +426,13 @@ msgstr "Verbindung testen"
 #: templates/netbox_proxmox/proxmoxconnection.html:13
 msgid "Sync now"
 msgstr "Jetzt abgleichen"
+
+#: templates/netbox_proxmox/proxmoxconnection.html:22
+msgid ""
+"TLS certificate verification is off: anyone in the network path could "
+"intercept the API token. Set a CA bundle (e.g. the Proxmox CA /etc/pve/pve-"
+"root-ca.pem) and enable verification."
+msgstr "Die Prüfung des TLS-Zertifikats ist aus: Jeder auf dem Netzwerkweg könnte das API-Token abfangen. Ein CA-Bundle hinterlegen (z. B. die Proxmox-CA /etc/pve/pve-root-ca.pem) und die Prüfung einschalten."
 
 #: views.py:42
 msgid "Token secret variable"

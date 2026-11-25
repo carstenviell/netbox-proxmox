@@ -9,13 +9,14 @@ from dcim.models import Device, DeviceRole, DeviceType, Manufacturer, Site
 from ipam.models import IPAddress
 from tenancy.models import Tenant
 from users.models import User
-from virtualization.models import VirtualMachine
+from extras.models import Tag
+from virtualization.models import Cluster, ClusterType, VirtualMachine
 
-from .client import ProxmoxError
+from .client import ProxmoxClient, ProxmoxError
 from .custom_fields import CF_VMID, ensure_custom_fields
 from .jobs import changelog_context
 from .models import ProxmoxConnection, ProxmoxObject
-from .sync import agent_ips, parse_disks, parse_nics, size_mb, storage_usage, sync_connection
+from .sync import TAG_MARKER, agent_ips, parse_disks, parse_nics, size_mb, storage_usage, sync_connection
 
 LOG = logging.getLogger('netbox_proxmox.tests')
 MAC1, MAC2 = 'bc:24:11:00:00:01', 'bc:24:11:00:00:02'
@@ -228,6 +229,42 @@ class SyncTests(TestCase):
         self.assertIsNone(IPAddress.objects.get(address__net_host='10.0.0.5').assigned_object_id)
 
 
+    # -- security audit 2026-11-25 ------------------------------------------------------------
+    def agent_result(self):
+        return self.api[('nodes', 'pve1', 'qemu', 101, 'agent', 'network-get-interfaces')]['result']
+
+    def test_guest_ip_count_is_capped(self):  # MEDIUM-01
+        self.agent_result()[1]['ip-addresses'] = [{'ip-address': f'10.9.0.{i}', 'prefix': 24} for i in range(1, 41)]
+        self.run_sync()
+        web = VirtualMachine.objects.get(name='web01')
+        self.assertEqual(web.interfaces.get(name='net0').ip_addresses.count(), 16)
+
+    def test_guest_cannot_claim_reserved_ip(self):  # MEDIUM-01
+        reserved = IPAddress.objects.create(address='10.0.0.5/24', status='reserved')
+        self.run_sync()
+        reserved.refresh_from_db()
+        self.assertIsNone(reserved.assigned_object_id)
+        self.assertIsNone(VirtualMachine.objects.get(name='web01').primary_ip4)
+
+    def test_vm_of_other_cluster_is_not_taken_over(self):  # MEDIUM-02
+        other = Cluster.objects.create(name='vmware', type=ClusterType.objects.create(name='VMware', slug='vmware'))
+        foreign = VirtualMachine.objects.create(name='web01', cluster=other, status='active')
+        self.run_sync()
+        foreign.refresh_from_db()
+        self.assertEqual((foreign.cluster, foreign.status), (other, 'active'))
+        self.assertFalse(hasattr(foreign, 'proxmox_object'))
+        self.assertEqual(VirtualMachine.objects.filter(name='web01').count(), 2)
+
+    def test_existing_netbox_tag_is_not_attached(self):  # LOW-01
+        Tag.objects.create(name='prod', slug='prod')
+        self.run_sync()
+        web = VirtualMachine.objects.get(name='web01')
+        self.assertEqual(list(web.tags.names()), ['web'])
+        self.assertEqual(Tag.objects.get(slug='web').description, TAG_MARKER)
+        self.run_sync()  # sync-created tags keep being used
+        self.assertEqual(list(VirtualMachine.objects.get(name='web01').tags.names()), ['web'])
+
+
 class ViewTests(TestCase):
     def test_overview_requires_permission(self):
         user = User.objects.create_user(username='viewer')
@@ -262,6 +299,29 @@ class ViewTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get('/plugins/proxmox/connections/add/').status_code, 403)
         self.assertEqual(self.client.get('/plugins/proxmox/connections/').status_code, 200)
+
+
+class ClientTests(TestCase):
+    def test_redirect_is_refused(self):  # LOW-02
+        from unittest import mock
+        import requests
+        resp = requests.Response()
+        resp.status_code, resp.headers['Location'] = 302, 'https://internal.example/'
+        with mock.patch('netbox_proxmox.client.requests.get', return_value=resp) as get:
+            with self.assertRaises(ProxmoxError):
+                ProxmoxClient('https://pve.example:8006', 'a@pam!b', 'secret').version()
+        self.assertIs(get.call_args.kwargs['allow_redirects'], False)
+
+    def test_tls_warning_on_connection_page(self):  # LOW-03
+        SyncTests.setUpTestData.__func__(SyncTests)
+        conn = ProxmoxConnection.objects.create(
+            name='lab', url='https://pve.example.local:8006', token_id='root@pam!netbox', site=SyncTests.site,
+            node_role=SyncTests.role, node_device_type=SyncTests.dt, verify_tls=False)
+        self.client.force_login(User.objects.create_user(username='su', is_superuser=True))
+        self.assertContains(self.client.get(conn.get_absolute_url()), 'pve-root-ca.pem')
+        conn.verify_tls = True
+        conn.save()
+        self.assertNotContains(self.client.get(conn.get_absolute_url()), 'pve-root-ca.pem')
 
 
 class TranslationTests(TestCase):

@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.1.1] – 2026-11-25
+### Security
+- IP addresses reported from inside a guest (QEMU guest agent, LXC) are capped at 16 per interface and 64 per VM and never claim an IP documented as reserved/deprecated.
+- Name matching only considers objects without a cluster or in this Proxmox cluster (nodes: also only at the connection's site); same-named objects of other clusters are no longer taken over.
+- Proxmox tags only attach tags created by the sync (marked by their description); existing NetBox tags with the same name are skipped. Migration `0002` marks the tags created by 0.1.0.
+- The API client no longer follows HTTP redirects.
+- Warning on the connection page while TLS verification is off; README explains the Proxmox CA bundle.
+- Minimum `requests` version raised to 2.32.4 (CVE-2024-47081).
+
 ## [0.1.0] – 2026-11-25
 Verified against Proxmox VE 9.2 (2 nodes, 4 VMs, 19 LXC containers).
 

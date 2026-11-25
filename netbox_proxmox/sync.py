@@ -38,6 +38,10 @@ OSTYPE_NAMES = {
 }
 NODE_IFACE_TYPES = {'bridge': 'bridge', 'OVSBridge': 'bridge', 'bond': 'lag', 'OVSBond': 'lag',
                     'vlan': 'virtual', 'OVSIntPort': 'virtual', 'OVSPort': 'virtual'}
+MAX_IPS_PER_IFACE = 16  # guest agent data comes from inside the VM: cap what one guest can write to IPAM
+MAX_IPS_PER_VM = 64
+GUEST_SKIP_STATUS = ('reserved', 'deprecated')  # documented IPs a guest must not claim
+TAG_MARKER = 'Created by the Proxmox sync'  # only tags carrying this description are attached by the sync
 VM_STATUS = {'running': 'active', 'stopped': 'offline', 'paused': 'paused', 'suspended': 'paused'}
 
 
@@ -187,17 +191,30 @@ def get_or_create_named(model, name, **extra):
     return obj
 
 
-def add_tags(obj, tags):
-    names = [t for t in str(tags or '').split(';') if t.strip()]
-    missing = [n for n in names if not obj.tags.filter(slug=slugify(n)).exists()]
-    if missing:
+def add_tags(obj, tags, logger):
+    """Attach Proxmox tags (never remove). Only tags created by the sync are used: an existing NetBox tag with
+    the same name may drive permissions, config contexts or event rules and must not be set from Proxmox."""
+    to_add = []
+    for name in (t.strip() for t in str(tags or '').split(';')):
+        if not name or obj.tags.filter(slug=slugify(name)).exists():
+            continue
+        tag = Tag.objects.filter(slug=slugify(name)[:100]).first() or Tag.objects.filter(name__iexact=name).first()
+        if tag is None:
+            tag = get_or_create_named(Tag, name, description=TAG_MARKER)
+        elif tag.description != TAG_MARKER:
+            logger.warning(_('%(obj)s: tag %(tag)s exists in NetBox and is not managed by the Proxmox sync – '
+                             'skipped.') % {'obj': obj, 'tag': tag})
+            continue
+        to_add.append(tag)
+    if to_add:
         obj.snapshot()
-        obj.tags.add(*[get_or_create_named(Tag, n) for n in missing])
+        obj.tags.add(*to_add)
 
 
-def sync_ips(owner, iface, addresses, logger):
+def sync_ips(owner, iface, addresses, logger, guest=False):
     """Make the interface carry exactly `addresses` (ip_interface list). Existing global-VRF IPs are reused;
-    IPs assigned to another object are left alone. IPs no longer reported are unassigned, never deleted."""
+    IPs assigned to another object are left alone. IPs no longer reported are unassigned, never deleted.
+    guest=True (data from inside a VM/container): reserved/deprecated IPs are not claimed."""
     wanted = {str(ip.ip): ip for ip in addresses}
     current = {str(ip.address.ip): ip for ip in iface.ip_addresses.all()}
     for host, ip in wanted.items():
@@ -206,6 +223,9 @@ def sync_ips(owner, iface, addresses, logger):
         existing = IPAddress.objects.filter(address__net_host=host, vrf__isnull=True).first()
         if existing is None:
             apply(IPAddress(address=str(ip), status='active'), assigned_object=iface)
+        elif guest and existing.status in GUEST_SKIP_STATUS:
+            logger.warning(_('%(owner)s: %(ip)s is documented as %(status)s in NetBox – not assigned.') % {
+                'owner': owner, 'ip': host, 'status': existing.status})
         elif existing.assigned_object_id is None:
             apply(existing, assigned_object=iface)
         else:
@@ -232,11 +252,13 @@ def set_primary_ips(owner, assigned):
 
 
 # -- matching --------------------------------------------------------------------------------
-def match(link, model, name, narrow):
-    """(object, None) | (None, None) for "create" | (None, message) when ambiguous."""
+def match(link, queryset, name, narrow):
+    """(object, None) | (None, None) for "create" | (None, message) when ambiguous.
+    `queryset` limits name matching to objects that may belong to this Proxmox cluster - never take over an
+    object of another cluster that just happens to have the same name."""
     if link.target:
         return link.target, None
-    candidates = list(model.objects.filter(name__iexact=name, proxmox_object__isnull=True)[:20])
+    candidates = list(queryset.filter(name__iexact=name, proxmox_object__isnull=True)[:20])
     if len(candidates) > 1:
         narrowed = [c for c in candidates if narrow(c)]
         if len(narrowed) == 1:
@@ -337,7 +359,8 @@ class Sync:
     # -- nodes ---------------------------------------------------------------------------------
     def sync_node(self, link, r):
         name, online = r['node'], r.get('status') == 'online'
-        device, ambiguous = match(link, Device, name, lambda d: d.site_id == self.conn.site_id)
+        scope = Q(cluster__isnull=True) | Q(cluster=self.cluster)
+        device, ambiguous = match(link, Device.objects.filter(scope, site=self.conn.site), name, lambda d: True)
         if ambiguous:
             return 'ambiguous', ambiguous
         fields = {'cluster': self.cluster, 'status': 'active' if online else 'offline'}
@@ -375,7 +398,8 @@ class Sync:
     # -- guests --------------------------------------------------------------------------------
     def sync_guest(self, link, r, name):
         kind, vmid, node = r['type'], r['vmid'], r.get('node')
-        vm, ambiguous = match(link, VirtualMachine, name, lambda v: v.cluster_id == self.cluster.pk)
+        scope = Q(cluster__isnull=True) | Q(cluster=self.cluster)
+        vm, ambiguous = match(link, VirtualMachine.objects.filter(scope), name, lambda v: v.cluster_id == self.cluster.pk)
         if ambiguous:
             return 'ambiguous', ambiguous
         try:
@@ -411,7 +435,7 @@ class Sync:
             vm.custom_field_data[CF_VMID] = vmid
             vm.save()
         self.link_target(link, vm)
-        add_tags(vm, r.get('tags'))
+        add_tags(vm, r.get('tags'), self.logger)
         if config is not None:
             changed |= self.sync_disks(vm, parse_disks(config, kind))
             changed |= self.sync_vm_interfaces(vm, parse_nics(config, kind), self.live_ips(kind, node, vmid, r))
@@ -455,7 +479,7 @@ class Sync:
         return changed
 
     def sync_vm_interfaces(self, vm, nics, live):
-        changed = False
+        changed, budget = False, MAX_IPS_PER_VM
         wanted = {n['name'] for n in nics}
         for iface in vm.interfaces.filter(name__regex=r'^net\d+$').exclude(name__in=wanted):
             sync_ips(vm, iface, [], self.logger)  # deleting the interface would delete its IPs
@@ -477,7 +501,13 @@ class Sync:
             ips = live.get(nic['mac'], []) if live is not None else (
                 [ip for ip in map(usable_ip, nic['static']) if ip] or None)
             if ips is not None:
-                sync_ips(vm, iface, ips, self.logger)
+                limit = min(MAX_IPS_PER_IFACE, budget)
+                if len(ips) > limit:
+                    self.logger.warning(_('%(vm)s %(iface)s: %(n)d IP addresses reported, only %(limit)d taken.') % {
+                        'vm': vm, 'iface': nic['name'], 'n': len(ips), 'limit': limit})
+                    ips = ips[:limit]
+                budget -= len(ips)
+                sync_ips(vm, iface, ips, self.logger, guest=True)
         set_primary_ips(vm, IPAddress.objects.filter(vminterface__virtual_machine=vm).order_by('pk'))
         return changed
 
