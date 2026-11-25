@@ -1,0 +1,16 @@
+{% extends 'generic/_base.html' %}
+{% load i18n %}
+{% block title %}{% trans "Confirm" %}{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <p>{{ question }}</p>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="return_url" value="{{ return_url }}">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+        <button type="submit" class="btn btn-primary">{% trans "Confirm" %}</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

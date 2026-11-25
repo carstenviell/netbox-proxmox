@@ -1,0 +1,17 @@
+{% extends 'generic/_base.html' %}
+{% load i18n form_helpers %}
+{% block title %}{% blocktrans with obj=target %}Assign {{ obj }}{% endblocktrans %}{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <p>{% blocktrans with obj=target %}{{ obj }} will be linked to the selected Proxmox object. Nothing else is changed now: the pending changes are shown in the sync overview and written when you sync the object.{% endblocktrans %}</p>
+      <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        {% render_field form.link %}
+        <a href="{% url 'plugins:netbox_proxmox:orphans' %}" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+        <button type="submit" class="btn btn-primary">{% trans "Assign" %}</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

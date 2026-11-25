@@ -1,0 +1,11 @@
+{% load i18n %}
+{% with kind=record|meta:'model_name' %}
+  <div class="d-flex gap-1 justify-content-end">
+    {% if perms.netbox_proxmox.change_proxmoxobject %}
+      <a href="{% if kind == 'device' %}{% url 'plugins:netbox_proxmox:orphan_assign' kind='devices' pk=record.pk %}{% else %}{% url 'plugins:netbox_proxmox:orphan_assign' kind='vms' pk=record.pk %}{% endif %}" class="btn btn-sm btn-primary">{% trans "Assign" %}</a>
+    {% endif %}
+    {% if perms.netbox_proxmox.change_ignoredorphan %}
+      <a href="{% if kind == 'device' %}{% url 'plugins:netbox_proxmox:orphan_toggle_ignore' kind='devices' pk=record.pk %}{% else %}{% url 'plugins:netbox_proxmox:orphan_toggle_ignore' kind='vms' pk=record.pk %}{% endif %}" class="btn btn-sm btn-outline-secondary">{% if record.proxmox_ignored %}{% trans "Unignore" %}{% else %}{% trans "Ignore" %}{% endif %}</a>
+    {% endif %}
+  </div>
+{% endwith %}

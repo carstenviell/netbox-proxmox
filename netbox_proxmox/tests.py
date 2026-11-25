@@ -1,4 +1,6 @@
 import copy
+from collections import Counter
+from unittest import mock
 import ipaddress
 import logging
 
@@ -15,8 +17,8 @@ from virtualization.models import Cluster, ClusterType, VirtualMachine
 from .client import ProxmoxClient, ProxmoxError
 from .custom_fields import CF_VMID, ensure_custom_fields
 from .jobs import changelog_context
-from .models import ProxmoxConnection, ProxmoxObject
-from .sync import TAG_MARKER, agent_ips, parse_disks, parse_nics, size_mb, storage_usage, sync_connection
+from .models import IgnoredOrphan, ProxmoxConnection, ProxmoxObject
+from .sync import TAG_MARKER, Sync, agent_ips, assign, discover, parse_disks, parse_nics, size_mb, storage_usage
 
 LOG = logging.getLogger('netbox_proxmox.tests')
 MAC1, MAC2 = 'bc:24:11:00:00:01', 'bc:24:11:00:00:02'
@@ -80,6 +82,17 @@ def grant(user, model, actions, constraints=None):
     perm.users.add(user)
 
 
+def full_sync(conn, api, user):
+    """Old one-step behaviour for the domain tests: fetch, then write everything new/pending."""
+    counts = Counter(discover(conn, FakeClient(api), LOG))  # fetch runs outside the changelog context (as the job)
+    with changelog_context(user):
+        sync = Sync(conn, LOG)
+        sync.write(list(conn.proxmox_objects.filter(state__in=['new', 'pending'])))
+        sync.offline_stale()
+    counts.update(sync.counts)
+    return counts
+
+
 class ParserTests(TestCase):
     def test_size(self):
         self.assertEqual(size_mb('32G'), 32768)
@@ -132,8 +145,13 @@ class SyncTests(TestCase):
             node_role=self.role, node_device_type=self.dt, vm_role=self.vm_role)
 
     def run_sync(self):
-        with changelog_context(self.user):
-            return sync_connection(self.conn, FakeClient(self.api), LOG)
+        return full_sync(self.conn, self.api, self.user)
+
+    def fetch(self):
+        return discover(self.conn, FakeClient(self.api), LOG)
+
+    def link(self, pid):
+        return ProxmoxObject.objects.get(connection=self.conn, proxmox_id=str(pid))
 
     def resource(self, vmid):
         return next(r for r in self.api[('cluster', 'resources')] if r.get('vmid') == vmid)
@@ -174,7 +192,7 @@ class SyncTests(TestCase):
         before = ObjectChange.objects.count()
         counts = self.run_sync()
         self.assertEqual(ObjectChange.objects.count(), before)
-        self.assertEqual((counts['created'], counts['updated'], counts['unchanged']), (0, 0, 4))
+        self.assertEqual((counts['ok'], counts['pending'], counts['new'], counts['created']), (4, 0, 0, 0))
 
     def test_existing_vm_matched_by_name(self):
         vm = VirtualMachine.objects.create(name='WEB01', site=self.site)
@@ -265,13 +283,128 @@ class SyncTests(TestCase):
         self.assertEqual(list(VirtualMachine.objects.get(name='web01').tags.names()), ['web'])
 
 
+    # -- 0.2.0: fetch / review / sync ------------------------------------------------------------
+    def counts_of(self):
+        return (Device.objects.count(), VirtualMachine.objects.count(), IPAddress.objects.count(),
+                ObjectChange.objects.count())
+
+    def test_fetch_writes_nothing_to_netbox(self):
+        before = self.counts_of()
+        counts = self.fetch()
+        self.assertEqual(self.counts_of(), before)
+        self.assertEqual(counts['new'], 4)
+        web = self.link(101)
+        self.assertEqual((web.state, web.target), ('new', None))
+        self.assertIn('+ virtual machine web01', web.changes)
+        self.assertTrue(any('10.0.0.5/24' in c for c in web.changes))
+
+    def test_pending_changes_are_listed_before_sync(self):
+        self.run_sync()
+        self.resource(101).update(maxmem=8 * G, node='pve2')
+        cfg = self.api[('nodes', 'pve1', 'qemu', 101, 'config')]
+        cfg['scsi1'] = 'ceph:vm-101-disk-1,size=10G'
+        self.api[('nodes', 'pve2', 'qemu', 101, 'config')] = cfg
+        self.fetch()
+        web = self.link(101)
+        self.assertEqual(web.state, 'pending')
+        text = '\n'.join(web.changes)
+        self.assertIn('memory 4096 → 8192', text)
+        self.assertIn('pve1 → pve2', text)
+        self.assertIn('+ virtual disk scsi1', text)
+        self.assertEqual(VirtualMachine.objects.get(name='web01').memory, 4096)  # not written yet
+        self.assertEqual(self.link(200).state, 'ok')
+
+    def test_name_match_is_linked_but_not_changed(self):
+        vm = VirtualMachine.objects.create(name='WEB01', site=self.site, memory=1)
+        before = ObjectChange.objects.count()
+        self.fetch()
+        link = self.link(101)
+        self.assertEqual((link.virtual_machine, link.state), (vm, 'pending'))
+        vm.refresh_from_db()
+        self.assertEqual((vm.name, vm.memory, ObjectChange.objects.count()), ('WEB01', 1, before))
+
+    def test_sync_selected_only(self):
+        self.fetch()
+        with changelog_context(self.user):
+            Sync(self.conn, LOG).write([self.link(101)])
+        self.assertTrue(VirtualMachine.objects.filter(name='web01').exists())
+        self.assertFalse(VirtualMachine.objects.filter(name='ct01').exists())
+        self.assertFalse(Device.objects.exists())  # node not selected: web01 has no host yet
+        self.assertEqual((self.link(101).state, self.link(200).state), ('ok', 'new'))
+
+    def test_ignored_objects_are_never_written(self):
+        self.fetch()
+        ProxmoxObject.objects.filter(proxmox_id='101').update(ignored=True)
+        with changelog_context(self.user):
+            Sync(self.conn, LOG).write(list(self.conn.proxmox_objects.all()))
+        self.assertFalse(VirtualMachine.objects.filter(name='web01').exists())
+        self.assertTrue(VirtualMachine.objects.filter(name='ct01').exists())
+
+    def test_daily_run_updates_linked_but_creates_nothing(self):
+        self.run_sync()
+        self.resource(101)['maxmem'] = 8 * G
+        self.api[('cluster', 'resources')].append(
+            {'type': 'lxc', 'vmid': 300, 'name': 'new-ct', 'node': 'pve2', 'status': 'stopped', 'maxmem': G})
+        self.api[('nodes', 'pve2', 'lxc', 300, 'config')] = {'ostype': 'debian'}
+        self.fetch()
+        with changelog_context(None):  # like the system job
+            Sync(self.conn, LOG).write(list(self.conn.proxmox_objects.filter(state='pending', ignored=False)))
+        self.assertEqual(VirtualMachine.objects.get(name='web01').memory, 8192)
+        self.assertFalse(VirtualMachine.objects.filter(name='new-ct').exists())
+        self.assertEqual(self.link(300).state, 'new')
+
+    def test_create_requires_add_permission(self):
+        user = User.objects.create_user(username='operator')
+        grant(user, ProxmoxObject, ['view', 'change'])
+        grant(user, VirtualMachine, ['view', 'change'])  # no 'add'
+        self.fetch()
+        with changelog_context(user):
+            Sync(self.conn, LOG, user=user).write([self.link(101)])
+        self.assertFalse(VirtualMachine.objects.exists())
+        self.assertEqual(self.link(101).state, 'error')
+
+    def test_update_requires_change_permission_with_constraints(self):
+        self.run_sync()
+        self.resource(101)['maxmem'] = 8 * G
+        self.fetch()
+        user = User.objects.create_user(username='operator')
+        grant(user, VirtualMachine, ['view', 'change'], constraints={'name': 'ct01'})  # web01 excluded
+        with changelog_context(user):
+            Sync(self.conn, LOG, user=user).write([self.link(101)])
+        self.assertEqual(VirtualMachine.objects.get(name='web01').memory, 4096)
+        self.assertEqual(self.link(101).state, 'error')
+
+    def test_manual_assignment(self):
+        self.fetch()
+        vm = VirtualMachine.objects.create(name='webserver-old', site=self.site)
+        state = assign(self.link(101), vm, LOG)
+        self.assertEqual((state, self.link(101).virtual_machine), ('pending', vm))
+        vm.refresh_from_db()
+        self.assertEqual(vm.name, 'webserver-old')  # only linked; written on sync
+        with self.assertRaises(Exception):
+            assign(self.link(200), vm, LOG)  # already linked to 101
+
+    def test_orphans(self):
+        from .views import orphan_queryset
+        self.run_sync()
+        cluster = ProxmoxConnection.objects.get(pk=self.conn.pk).cluster
+        manual = VirtualMachine.objects.create(name='manual', cluster=cluster)
+        self.api[('cluster', 'resources')] = [r for r in self.api[('cluster', 'resources')] if r.get('vmid') != 101]
+        self.fetch()
+        names = set(orphan_queryset(VirtualMachine).values_list('name', flat=True))
+        self.assertEqual(names, {'web01', 'manual'})
+        IgnoredOrphan.objects.create(virtual_machine=manual)
+        self.assertEqual(set(orphan_queryset(VirtualMachine).values_list('name', flat=True)), {'web01'})
+        self.assertEqual(set(orphan_queryset(VirtualMachine, ignored=True).values_list('name', flat=True)), {'manual'})
+
+
 class ViewTests(TestCase):
     def test_overview_requires_permission(self):
         user = User.objects.create_user(username='viewer')
         self.client.force_login(user)
-        self.assertEqual(self.client.get('/plugins/proxmox/objects/').status_code, 403)
+        self.assertEqual(self.client.get('/plugins/proxmox/sync/').status_code, 403)
         grant(user, ProxmoxObject, ['view'])
-        self.assertEqual(self.client.get('/plugins/proxmox/objects/').status_code, 200)
+        self.assertEqual(self.client.get('/plugins/proxmox/sync/').status_code, 200)
 
     def test_pages_render(self):
         SyncTests.setUpTestData.__func__(SyncTests)
@@ -279,14 +412,16 @@ class ViewTests(TestCase):
             name='lab', url='https://pve.example.local:8006', token_id='root@pam!netbox', site=SyncTests.site,
             node_role=SyncTests.role, node_device_type=SyncTests.dt)
         admin = User.objects.create_user(username='admin2', is_superuser=True)
-        with changelog_context(admin):
-            sync_connection(conn, FakeClient(copy.deepcopy(API)), LOG)
+        full_sync(conn, copy.deepcopy(API), admin)
         conn.refresh_from_db()
         self.client.force_login(admin)
         web = VirtualMachine.objects.get(name='web01')
+        link = ProxmoxObject.objects.get(proxmox_id='200')
         for url in (conn.get_absolute_url(), '/plugins/proxmox/connections/', '/plugins/proxmox/connections/add/',
-                    '/plugins/proxmox/objects/', web.get_absolute_url(), web.device.get_absolute_url(),
-                    conn.cluster.get_absolute_url()):
+                    '/plugins/proxmox/sync/', '/plugins/proxmox/sync/?ignored=true', '/plugins/proxmox/orphans/',
+                    '/plugins/proxmox/orphans/devices/', f'/plugins/proxmox/sync/{link.pk}/ignore/',
+                    f'/plugins/proxmox/orphans/vms/{web.pk}/assign/', web.get_absolute_url(),
+                    web.device.get_absolute_url(), conn.cluster.get_absolute_url()):
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, 200)
@@ -299,6 +434,76 @@ class ViewTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get('/plugins/proxmox/connections/add/').status_code, 403)
         self.assertEqual(self.client.get('/plugins/proxmox/connections/').status_code, 200)
+
+
+class ActionViewTests(TestCase):
+    """POST actions of the sync overview and the orphans page."""
+    def setUp(self):
+        SyncTests.setUpTestData.__func__(SyncTests)
+        self.conn = ProxmoxConnection.objects.create(
+            name='lab', url='https://pve.example.local:8006', token_id='root@pam!netbox', site=SyncTests.site,
+            node_role=SyncTests.role, node_device_type=SyncTests.dt)
+        self.user = User.objects.create_user(username='op')
+        grant(self.user, ProxmoxObject, ['view', 'change'])
+        self.client.force_login(self.user)
+        discover(self.conn, FakeClient(copy.deepcopy(API)), LOG)
+
+    def test_bulk_sync_enqueues_only_selected(self):
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        with mock.patch('netbox_proxmox.views.ProxmoxSyncJob.enqueue') as enqueue:
+            enqueue.return_value.get_absolute_url.return_value = '/core/jobs/1/'
+            self.client.post('/plugins/proxmox/sync/bulk-sync/', {'pk': [pk]})
+        self.assertEqual(enqueue.call_args.kwargs['object_ids'], [pk])
+        self.assertEqual(enqueue.call_args.kwargs['mode'], 'apply')
+
+    def test_fetch_only_mode(self):
+        with mock.patch('netbox_proxmox.views.ProxmoxSyncJob.enqueue') as enqueue:
+            enqueue.return_value.get_absolute_url.return_value = '/core/jobs/1/'
+            self.client.post('/plugins/proxmox/sync/fetch/')
+        self.assertEqual(enqueue.call_args.kwargs['mode'], 'fetch')
+
+    def test_bulk_ignore_and_unignore(self):
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        self.client.post('/plugins/proxmox/sync/bulk-ignore/', {'pk': [pk]})
+        self.assertTrue(ProxmoxObject.objects.get(pk=pk).ignored)
+        self.client.post('/plugins/proxmox/sync/bulk-unignore/', {'pk': [pk]})
+        self.assertFalse(ProxmoxObject.objects.get(pk=pk).ignored)
+
+    def test_assign_only_changeable_objects(self):
+        allowed = VirtualMachine.objects.create(name='allowed', site=SyncTests.site)
+        hidden = VirtualMachine.objects.create(name='hidden', site=SyncTests.site)
+        grant(self.user, VirtualMachine, ['view', 'change'], constraints={'name': 'allowed'})
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        self.client.post(f'/plugins/proxmox/sync/{pk}/assign/', {'target': hidden.pk})
+        self.assertIsNone(ProxmoxObject.objects.get(pk=pk).virtual_machine)
+        self.client.post(f'/plugins/proxmox/sync/{pk}/assign/', {'target': allowed.pk})
+        self.assertEqual(ProxmoxObject.objects.get(pk=pk).virtual_machine, allowed)
+
+    def test_actions_require_permission(self):
+        nobody = User.objects.create_user(username='nobody')
+        self.client.force_login(nobody)
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        for url in ('/plugins/proxmox/sync/fetch/', '/plugins/proxmox/sync/bulk-sync/',
+                    '/plugins/proxmox/sync/bulk-ignore/', f'/plugins/proxmox/sync/{pk}/ignore/'):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.post(url, {'pk': [pk]}).status_code, 403)
+
+    def test_orphan_decommission_and_ignore(self):
+        admin = User.objects.create_user(username='adm', is_superuser=True)
+        full_sync(self.conn, copy.deepcopy(API), admin)
+        cluster = ProxmoxConnection.objects.get(pk=self.conn.pk).cluster
+        orphan = VirtualMachine.objects.create(name='manual', cluster=cluster, status='active')
+        other = VirtualMachine.objects.create(name='manual2', cluster=cluster, status='active')
+        self.client.force_login(admin)
+        self.client.post('/plugins/proxmox/orphans/vms/bulk-decommission/', {'pk': [orphan.pk]})
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.status, 'decommissioning')
+        self.client.post(f'/plugins/proxmox/orphans/vms/{other.pk}/ignore/')
+        self.assertTrue(IgnoredOrphan.objects.filter(virtual_machine=other).exists())
+        web = VirtualMachine.objects.get(name='web01')  # linked, not an orphan: decommission must not touch it
+        self.client.post('/plugins/proxmox/orphans/vms/bulk-decommission/', {'pk': [web.pk]})
+        web.refresh_from_db()
+        self.assertEqual(web.status, 'active')
 
 
 class ClientTests(TestCase):

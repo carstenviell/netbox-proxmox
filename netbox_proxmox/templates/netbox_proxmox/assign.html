@@ -1,0 +1,18 @@
+{% extends 'generic/_base.html' %}
+{% load i18n form_helpers %}
+{% block title %}{% blocktrans with name=link.name %}Assign {{ name }}{% endblocktrans %}{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <p>{% blocktrans with kind=link.get_kind_display id=link.proxmox_id conn=link.connection %}Proxmox {{ kind }} {{ id }} ({{ conn }}) will be linked to the selected NetBox object. Nothing else is changed now: the pending changes are shown in the sync overview and written when you sync the object.{% endblocktrans %}</p>
+      <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        {% render_field form.target %}
+        <input type="hidden" name="return_url" value="{{ request.GET.return_url }}">
+        <a href="{% url 'plugins:netbox_proxmox:proxmoxobject_list' %}" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+        <button type="submit" class="btn btn-primary">{% trans "Assign" %}</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

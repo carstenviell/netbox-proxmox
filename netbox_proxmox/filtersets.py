@@ -22,6 +22,7 @@ class ProxmoxObjectFilterSet(django_filters.FilterSet):
     connection_id = django_filters.ModelMultipleChoiceFilter(queryset=ProxmoxConnection.objects.all())
     kind = django_filters.MultipleChoiceFilter(choices=ProxmoxObject.KIND_CHOICES)
     state = django_filters.MultipleChoiceFilter(choices=ProxmoxObject.STATE_CHOICES)
+    ignored = django_filters.BooleanFilter()
 
     class Meta:
         model = ProxmoxObject

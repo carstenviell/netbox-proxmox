@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.2.0] – 2026-11-25
+### Changed
+- **Fetch and sync are separate:** *Fetch from Proxmox* (formerly *Sync now*) only reads Proxmox and writes nothing to NetBox. New objects are created only when selected in the sync overview; the daily run updates already linked objects but never creates new ones.
+- Unique name matches are linked when fetching; the NetBox object is changed on sync.
+
+### Added
+- Sync overview: all Proxmox objects with state (new, changes pending, in sync, ambiguous, error, gone) and a field-by-field list of pending changes, computed by a dry run of the real sync (rolled back).
+- Checkboxes with *Sync selected*, *Ignore selected*, *Unignore selected*; per row *Assign* (to an existing NetBox object) and *Ignore*.
+- Orphans page: NetBox VMs/nodes in a Proxmox cluster without Proxmox counterpart, with *Assign*, *Ignore* and *Decommission selected*.
+- Manual syncs run with the permissions of the requesting user (`add`/`change` on the device/VM, constraints apply).
+- Migration `0003`.
+
 ## [0.1.1] – 2026-11-25
 ### Security
 - IP addresses reported from inside a guest (QEMU guest agent, LXC) are capped at 16 per interface and 64 per VM and never claim an IP documented as reserved/deprecated.

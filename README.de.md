@@ -8,7 +8,16 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
 
 ## Funktionen
 
-- **Mehrere Proxmox-Verbindungen** (je Cluster oder Einzel-Node), jeweils mit *Verbindung testen* und *Jetzt abgleichen*.
+- **Abrufen, prüfen, dann synchronisieren:** *Von Proxmox abrufen* liest nur aus Proxmox, in NetBox wird nichts
+  angelegt oder geändert. Die **Sync-Übersicht** zeigt jeden Node, jede VM und jeden Container mit Zustand und den
+  **ausstehenden Änderungen** Feld für Feld (z. B. `memory 4096 → 8192`, `device pve-a → pve-b`,
+  `+ virtual disk scsi1`). Ein oder mehrere Objekte anhaken, und *Ausgewählte synchronisieren* legt genau diese an
+  bzw. aktualisiert sie. Alternativ ein Proxmox-Objekt per *Zuordnen* mit einem bestehenden NetBox-Objekt verknüpfen
+  oder es *Ignorieren*.
+- **Orphans:** NetBox-VMs und -Nodes in einem Proxmox-Cluster ohne Proxmox-Gegenstück (in Proxmox gelöscht oder nie
+  verknüpft): *Zuordnen* zu einem Proxmox-Objekt, *Ignorieren* oder *Ausgewählte außer Betrieb setzen*.
+- **Mehrere Proxmox-Verbindungen** (je Cluster oder Einzel-Node), jeweils mit *Verbindung testen* und
+  *Von Proxmox abrufen*.
 - **Cluster** → NetBox-Cluster (Typ *Proxmox VE*), per Name gefunden oder angelegt.
 - **Nodes** → Geräte in diesem Cluster: Status, Plattform *Proxmox VE x.y*, Interfaces (Bridges, Bonds, VLANs) mit IPs,
   primäre IP. Fehlende Nodes werden mit den Standardwerten der Verbindung angelegt (Standort, Rolle, Gerätetyp).
@@ -24,8 +33,9 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
     passendes VLAN existiert).
   - IP-Adressen aus dem QEMU Guest Agent bzw. der LXC-Laufzeit (gestoppte Container: statische IPs aus der
     Konfiguration).
-- **Zuordnung:** gespeicherte Verknüpfung (VMID) → eindeutiger Name → Neuanlage. Vorhandene Objekte werden über
-  den Namen gefunden und aktualisiert, nie doppelt angelegt. Der Namensabgleich berücksichtigt nur Objekte ohne
+- **Zuordnung:** gespeicherte Verknüpfung (VMID) → eindeutiger Name → neu. Ein eindeutiger Namenstreffer wird beim
+  Abruf direkt verknüpft (das NetBox-Objekt selbst ändert sich erst beim Synchronisieren), vorhandene Objekte werden
+  also nie doppelt angelegt. Der Namensabgleich berücksichtigt nur Objekte ohne
   Cluster oder im eigenen Proxmox-Cluster (Nodes zusätzlich nur am Standort der Verbindung). Eine gleichnamige VM in
   einem anderen Cluster (z. B. VMware) wird also nie übernommen. Bei mehrdeutigem Namen bleibt das Objekt
   unangetastet und wird gemeldet.
@@ -39,14 +49,16 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
   nie gelöscht. Primäre IPv4/IPv6 wird nur gesetzt, wenn sie leer ist. IPs, die aus dem Inneren eines Gasts kommen
   (Guest Agent, Container), werden auf 16 je Interface und 64 je VM begrenzt und übernehmen nie eine IP, die als
   *reserved* oder *deprecated* dokumentiert ist.
-- **In Proxmox entfernt:** Objekte werden auf *offline* gesetzt und in der Sync-Übersicht als *stale* markiert,
-  nie gelöscht.
+- **In Proxmox entfernt:** Objekte werden als *stale* markiert, erscheinen unter Orphans und werden vom täglichen
+  Lauf auf *offline* gesetzt, nie gelöscht.
 - **Auslastungs-Snapshot** (täglich): CPU %, RAM und Speicher belegt/gesamt je Node, VM und Container sowie die
   Cluster-Summe (Shared Storage einfach gezählt). Er erscheint in einer Karte *Proxmox* an Geräten, VMs und
   Clustern, neben den Ressourcen, die aktiven VMs zugewiesen sind.
 - **Changelog:** Alle Änderungen erscheinen im NetBox-Changelog. Geplante Läufe laufen unter dem inaktiven
   Dienstbenutzer `proxmox-sync`, manuelle Läufe unter dem auslösenden Benutzer.
-- **Sync-Übersicht** mit Filtern (Verbindung, Typ, Zustand) zum Bereinigen von *mehrdeutig*, *Fehler* und *stale*.
+- **Täglicher Lauf:** ruft alle aktiven Verbindungen ab und aktualisiert die **bereits verknüpften** Objekte mit
+  ausstehenden Änderungen (CPU, RAM, Disks, Node, IPs, Auslastung). Neue Proxmox-Objekte werden **nie automatisch
+  angelegt**, sie warten in der Sync-Übersicht. Ignorierte Objekte werden nie geschrieben.
 - Nur lesend: Das Plugin schreibt nie nach Proxmox.
 
 ## Voraussetzungen
@@ -57,21 +69,21 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
 ## Installation
 
 Das Plugin ist nicht auf PyPI veröffentlicht. Installiert wird es aus dem GitHub-Release-Archiv. Das funktioniert
-ohne `git`, auch im netbox-docker-Image. `v0.1.1` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
+ohne `git`, auch im netbox-docker-Image. `v0.2.0` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
 
 **NetBox aus dem Quellcode (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
 
 # Plugin bei NetBox-Upgrades behalten (upgrade.sh installiert local_requirements.txt neu)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** in `plugin_requirements.txt` eintragen
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
 ```
 
 und in `Dockerfile-Plugins` (daraus `netbox`, `netbox-worker` und `netbox-housekeeping` über `docker-compose.override.yml` bauen):
@@ -147,13 +159,20 @@ passen (meist Hostname oder IP des Nodes). Solange die Prüfung aus ist, zeigt d
 ## Benutzung
 
 - *Verbindung testen* auf der Verbindungsseite zeigt die Proxmox-VE-Version.
-- *Jetzt abgleichen* startet den Abgleich dieser Verbindung als Hintergrund-Job (Log unter *Jobs*). Der System-Job
-  gleicht alle aktiven Verbindungen alle `sync_interval_min` Minuten ab.
-- *Plugins → Proxmox-Sync-Übersicht* listet jedes Proxmox-Objekt mit NetBox-Objekt, Zustand und Auslastung.
-  Typische Nacharbeit:
-  - *mehrdeutig*: doppelte NetBox-Objekte umbenennen oder zusammenführen, der nächste Abgleich verknüpft sie.
-  - *Fehler*: Die Meldung zeigt den Validierungsfehler (z. B. Node-Gerät an einem anderen Standort als der Cluster).
-  - *stale*: Das Objekt gibt es in Proxmox nicht mehr, in NetBox außer Betrieb nehmen oder löschen.
+1. *Plugins → Sync-Übersicht → Von Proxmox abrufen* (oder der Button an einer Verbindung) liest Proxmox im
+   Hintergrund (Log unter *Jobs*). In NetBox ändert sich nichts.
+2. Liste prüfen. Zustände: *Neu* (kein NetBox-Objekt), *Änderungen ausstehend* (verknüpft, die Spalte zeigt, was
+   sich ändern würde), *Abgeglichen*, *Mehrdeutig* (mehrere NetBox-Objekte mit diesem Namen, per *Zuordnen*
+   auflösen), *Fehler* (die Meldung nennt den Grund, z. B. fehlendes Recht oder Validierungsfehler),
+   *In Proxmox entfernt*.
+3. Objekte anhaken und *Ausgewählte synchronisieren*. Nodes zusammen mit (oder vor) ihren VMs synchronisieren,
+   damit die VMs ihren Host bekommen.
+4. *Zuordnen* verknüpft ein Proxmox-Objekt mit einem bestehenden NetBox-Objekt, *Ignorieren* nimmt es vom
+   Abgleich aus (Filter *Ignoriert*).
+5. *Plugins → Proxmox-Orphans* zeigt NetBox-VMs/-Nodes ohne Proxmox-Gegenstück (Reiter *VMs und Container* /
+   *Nodes*).
+
+Der System-Job läuft alle `sync_interval_min` Minuten (siehe *Täglicher Lauf* oben).
 
 ## Berechtigungen
 
@@ -162,7 +181,9 @@ passen (meist Hostname oder IP des Nodes). Solange die Prüfung aus ist, zeigt d
 | Verbindungen ansehen | `netbox_proxmox.view_proxmoxconnection` |
 | Verbindungen anlegen/ändern/löschen, Verbindung testen | **Superuser** (die Verbindung bestimmt, wohin das Token geht) |
 | Sync-Übersicht und Karten *Proxmox* ansehen | `netbox_proxmox.view_proxmoxobject` |
-| *Jetzt abgleichen* | `netbox_proxmox.change_proxmoxobject` |
+| Abrufen, Ausgewählte synchronisieren, Zuordnen, Ignorieren | `netbox_proxmox.change_proxmoxobject`, dazu `add`/`change` am NetBox-Gerät bzw. an der VM (Constraints greifen) |
+| Orphans ignorieren | `netbox_proxmox.change_ignoredorphan` |
+| Orphans außer Betrieb setzen | `change` am Gerät bzw. an der VM |
 
 ## Sprache
 
@@ -171,6 +192,9 @@ Die Oberfläche ist englisch mit deutscher Übersetzung. NetBox nutzt die Sprach
 ## Upgrade
 
 Neues Release-Archiv installieren (siehe Installation), `manage.py migrate` ausführen, `netbox` und `netbox-rq` neu starten.
+
+**0.1.x → 0.2.0:** Der Abgleich legt keine neuen Objekte mehr automatisch an. Nach dem Upgrade einmal *Von Proxmox
+abrufen*; bereits synchronisierte Objekte stehen auf *Abgeglichen*, neue warten in der Sync-Übersicht.
 
 ## Lizenz
 

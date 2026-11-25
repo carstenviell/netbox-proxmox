@@ -6,6 +6,18 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 
+## [0.2.0] – 2026-11-25
+### Geändert
+- **Abrufen und Synchronisieren getrennt:** *Von Proxmox abrufen* (vorher *Jetzt abgleichen*) liest nur aus Proxmox und schreibt nichts in NetBox. Neue Objekte werden nur angelegt, wenn sie in der Sync-Übersicht ausgewählt werden; der tägliche Lauf aktualisiert bereits verknüpfte Objekte, legt aber nie neue an.
+- Eindeutige Namenstreffer werden beim Abruf verknüpft; das NetBox-Objekt ändert sich erst beim Synchronisieren.
+
+### Neu
+- Sync-Übersicht: alle Proxmox-Objekte mit Zustand (neu, Änderungen ausstehend, abgeglichen, mehrdeutig, Fehler, entfernt) und Feld-für-Feld-Liste der ausstehenden Änderungen, berechnet per Probelauf des echten Abgleichs (mit Rollback).
+- Checkboxen mit *Ausgewählte synchronisieren*, *Ausgewählte ignorieren*, *Ignorieren aufheben*; je Zeile *Zuordnen* (zu einem bestehenden NetBox-Objekt) und *Ignorieren*.
+- Orphans-Seite: NetBox-VMs/-Nodes in einem Proxmox-Cluster ohne Proxmox-Gegenstück, mit *Zuordnen*, *Ignorieren* und *Ausgewählte außer Betrieb setzen*.
+- Manuelle Abgleiche laufen mit den Rechten des auslösenden Benutzers (`add`/`change` am Gerät bzw. an der VM, Constraints greifen).
+- Migration `0003`.
+
 ## [0.1.1] – 2026-11-25
 ### Sicherheit
 - IP-Adressen aus dem Inneren eines Gasts (QEMU Guest Agent, LXC) werden auf 16 je Interface und 64 je VM begrenzt und übernehmen nie eine als reserved/deprecated dokumentierte IP.

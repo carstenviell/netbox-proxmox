@@ -7,10 +7,12 @@
       <button type="submit" class="btn btn-outline-secondary"><i class="mdi mdi-lan-connect"></i> {% trans "Test connection" %}</button>
     </form>
   {% endif %}
+  <a href="{% url 'plugins:netbox_proxmox:proxmoxobject_list' %}?connection_id={{ object.pk }}" class="btn btn-outline-primary"><i class="mdi mdi-format-list-checks"></i> {% trans "Sync overview" %}</a>
   {% if perms.netbox_proxmox.change_proxmoxobject %}
-    <form method="post" action="{% url 'plugins:netbox_proxmox:sync_now' pk=object.pk %}">
+    <form method="post" action="{% url 'plugins:netbox_proxmox:fetch' %}">
       {% csrf_token %}
-      <button type="submit" class="btn btn-primary"><i class="mdi mdi-sync"></i> {% trans "Sync now" %}</button>
+      <input type="hidden" name="connection_id" value="{{ object.pk }}">
+      <button type="submit" class="btn btn-primary"><i class="mdi mdi-cloud-download"></i> {% trans "Fetch from Proxmox" %}</button>
     </form>
   {% endif %}
 {% endblock %}

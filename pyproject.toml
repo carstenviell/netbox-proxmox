@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netbox-proxmox"
-version = "0.1.1"
+version = "0.2.0"
 description = "NetBox plugin importing and syncing Proxmox VE clusters, nodes, VMs and LXC containers (incl. disks, interfaces, MAC and IP addresses, utilization) via the Proxmox API."
 authors = [{ name = "Carsten Viell" }]
 license = { text = "Apache-2.0" }

@@ -2,12 +2,22 @@
 Proxmox -> NetBox sync. Proxmox is the source for the fields set here; everything else on the NetBox objects
 (tenant, role after creation, description, comments, other tags, custom fields) is left alone.
 
-Matching: existing ProxmoxObject link -> unique name -> create. Objects gone from Proxmox are never deleted,
-only marked stale and set offline.
+Two phases (0.2.0):
+- discover(): fetch from Proxmox and store the raw data per object in ProxmoxObject.data. Nothing is written to
+  NetBox; the pending changes are computed by running the real write code in a savepoint that is rolled back
+  (preview == result, because both run on the same stored data).
+- write(): apply the stored data of selected (or, daily, of all linked) objects.
+
+Matching: existing ProxmoxObject link -> unique name (linked right away) -> new. Objects gone from Proxmox are never
+deleted, only marked stale (daily run: set offline) and listed as orphans.
 """
 import ipaddress
+import logging
 import re
+from collections import Counter
+from contextvars import ContextVar
 
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -166,17 +176,56 @@ def storage_usage(resources):
     return per_node, cluster
 
 
+# -- change recording (preview) -------------------------------------------------------------
+_RECORD = ContextVar('netbox_proxmox_record', default=None)
+MAX_CHANGES = 100
+
+
+def record(text):
+    """Note a change while a preview is recording (no-op otherwise)."""
+    rec = _RECORD.get()
+    if rec is not None and len(rec) < MAX_CHANGES:
+        rec.append(str(text))
+
+
+def _fmt(value):
+    return '—' if value is None or value == '' else str(value)
+
+
+def _label(obj):
+    return f'{obj._meta.verbose_name} {obj}'
+
+
+def _field_label(obj, name):
+    try:
+        return str(getattr(obj._meta.get_field(name), 'verbose_name', name))
+    except Exception:  # noqa: BLE001 - label only
+        return name
+
+
+def error_text(exc):
+    return '; '.join(getattr(exc, 'messages', None) or [str(exc)])
+
+
 # -- NetBox write helpers ------------------------------------------------------------------
 def apply(obj, **fields):
     """Set fields and save (with changelog snapshot) only if something changed. Returns True if saved."""
-    if obj.pk and all(getattr(obj, k) == v for k, v in fields.items()):
+    new = obj.pk is None
+    if not new and all(getattr(obj, k) == v for k, v in fields.items()):
         return False
-    if obj.pk:
+    old = {} if new else {k: getattr(obj, k) for k in fields}
+    if not new:
         obj.snapshot()
     for k, v in fields.items():
         setattr(obj, k, v)
     obj.full_clean()
     obj.save()
+    if new:
+        record(f'+ {_label(obj)}')
+    else:
+        for k, v in fields.items():
+            if old[k] != v:
+                record(f'{_label(obj)}: {_field_label(obj, k)} {_fmt(old[k])} → {_fmt(v)}')
     return True
 
 
@@ -209,6 +258,8 @@ def add_tags(obj, tags, logger):
     if to_add:
         obj.snapshot()
         obj.tags.add(*to_add)
+        for tag in to_add:
+            record(f'{_label(obj)}: + tag {tag}')
 
 
 def sync_ips(owner, iface, addresses, logger, guest=False):
@@ -269,188 +320,69 @@ def match(link, queryset, name, narrow):
 
 
 # -- sync ------------------------------------------------------------------------------------
-class Sync:
-    def __init__(self, conn, client, logger):
-        self.conn, self.client, self.logger = conn, client, logger
-        self.counts = {'created': 0, 'updated': 0, 'unchanged': 0, 'ambiguous': 0, 'error': 0, 'stale': 0, 'moved': 0}
-        self.now = timezone.now()
+class _Rollback(Exception):
+    """Ends a preview savepoint."""
 
-    def run(self):
+
+PREVIEW_LOG = logging.getLogger('netbox_proxmox.preview')  # previews must not fill the job log with "creating …"
+
+
+class Sync:
+    def __init__(self, conn, logger, client=None, user=None):
+        self.conn, self.logger, self.client, self.user = conn, logger, client, user
+        self.counts = Counter()
+        self.now = timezone.now()
+        self.dry = False
+
+    @property
+    def log(self):
+        return PREVIEW_LOG if self.dry else self.logger
+
+    # == phase 1: fetch from Proxmox (writes only ProxmoxObject) ===============================
+    def discover(self):
         resources = self.client.get('cluster', 'resources') or []
-        self.cluster = self.sync_cluster()
+        status = self.client.get('cluster', 'status') or []
+        cluster_name = next((s['name'] for s in status if s.get('type') == 'cluster'), None) or self.conn.name
         node_storage, cluster_storage = storage_usage(resources)
         nodes = [r for r in resources if r.get('type') == 'node']
         guests = [r for r in resources if r.get('type') in ('qemu', 'lxc') and not r.get('template')]
+        self.cluster_snapshot(cluster_name, nodes, cluster_storage)
         seen = set()
-        self.node_devices = {}
-        for r in nodes:
+        for r in nodes:  # nodes first: guests are previewed against the linked node devices
             u = usage(r)
             if r['node'] in node_storage:
                 u['disk_used'], u['disk_total'] = node_storage[r['node']]
             seen.add(('node', r['node']))
-            link = self.guarded('node', r['node'], r['node'], r['node'], u, lambda link, r=r: self.sync_node(link, r))
-            if link.device_id:
-                self.node_devices[r['node']] = link.device
+            self.prepare('node', r['node'], r['node'], r['node'], u, self.fetch_node(r))
         for r in guests:
             seen.add((r['type'], str(r['vmid'])))
-            name = r.get('name') or f"{r['type']}-{r['vmid']}"
-            self.guarded(r['type'], r['vmid'], name, r.get('node', ''), usage(r),
-                         lambda link, r=r, name=name: self.sync_guest(link, r, name))
-        self.cluster_snapshot(nodes, cluster_storage)
+            name = (r.get('name') or f"{r['type']}-{r['vmid']}")[:64]
+            self.prepare(r['type'], r['vmid'], name, r.get('node', ''), usage(r), self.fetch_guest(r))
         self.mark_stale(seen)
-        # queryset update: bookkeeping, not worth a changelog entry per run
-        type(self.conn).objects.filter(pk=self.conn.pk).update(last_sync=self.now)
-        return self.counts
+        type(self.conn).objects.filter(pk=self.conn.pk).update(last_sync=self.now)  # bookkeeping, no changelog
+        return dict(self.counts)
 
-    def guarded(self, kind, pid, name, node, usage_fields, fn):
-        """Run fn(link) in its own transaction; a failure marks only this object as 'error'."""
-        link, _created = ProxmoxObject.objects.get_or_create(
-            connection=self.conn, kind=kind, proxmox_id=str(pid), defaults={'state': 'ok'})
-        try:
-            with transaction.atomic():
-                state, message = fn(link)
-        except Exception as exc:  # noqa: BLE001 - one broken object must not stop the run
-            link = ProxmoxObject.objects.get(pk=link.pk)
-            state, message = 'error', '; '.join(getattr(exc, 'messages', None) or [str(exc)])
-            self.logger.error(f'{kind} {pid} ({name}): {message}')
-        self.counts['updated' if state == 'ok-changed' else 'unchanged' if state == 'ok' else state] += 1
-        link.state = 'ok' if state.startswith('ok') else state
-        link.name, link.node, link.message, link.last_seen = name, node, message[:500], self.now
-        for k, v in usage_fields.items():
-            setattr(link, k, v)
-        link.save()
-        return link
+    def fetch_node(self, r):
+        payload = {'resource': r}
+        if r.get('status') == 'online':
+            try:
+                payload['pveversion'] = (self.client.get('nodes', r['node'], 'status') or {}).get('pveversion', '')
+                payload['network'] = self.client.get('nodes', r['node'], 'network') or []
+            except ProxmoxError as exc:
+                self.logger.warning(f"node {r['node']}: {exc}")
+        return payload
 
-    @staticmethod
-    def link_target(link, obj):
-        field = 'device' if isinstance(obj, Device) else 'virtual_machine'
-        if getattr(link, field + '_id') != obj.pk:
-            setattr(link, field, obj)
-            link.save()
-
-    # -- cluster -------------------------------------------------------------------------------
-    def sync_cluster(self):
-        status = self.client.get('cluster', 'status') or []
-        name = next((s['name'] for s in status if s.get('type') == 'cluster'), None) or self.conn.name
-        cluster_type = get_or_create_named(ClusterType, 'Proxmox VE')
-        cluster = self.conn.cluster or Cluster.objects.filter(name__iexact=name, type=cluster_type).first()
-        with transaction.atomic():
-            if cluster is None:
-                cluster = Cluster(type=cluster_type, scope=self.conn.site, tenant=self.conn.tenant)
-                self.logger.info(_('Creating cluster %(name)s') % {'name': name})
-            apply(cluster, name=name, status='active')
-        if self.conn.cluster_id != cluster.pk:
-            self.conn.cluster = cluster
-            type(self.conn).objects.filter(pk=self.conn.pk).update(cluster=cluster)
-        return cluster
-
-    def cluster_snapshot(self, nodes, storage):
-        online = [n for n in nodes if n.get('status') == 'online']
-        cpus = sum(n.get('maxcpu') or 0 for n in online)
-        ProxmoxObject.objects.update_or_create(connection=self.conn, kind='cluster', proxmox_id='cluster',
-                                               defaults={
-            'name': self.cluster.name, 'state': 'ok', 'last_seen': self.now, 'cpu_count': cpus,
-            'cpu_usage': round(sum((n.get('cpu') or 0) * (n.get('maxcpu') or 0) for n in online) / cpus * 100, 1)
-            if cpus else None,
-            'mem_used': sum(n.get('mem') or 0 for n in online), 'mem_total': sum(n.get('maxmem') or 0 for n in online),
-            'disk_used': storage[0], 'disk_total': storage[1], 'uptime': None,
-        })
-
-    # -- nodes ---------------------------------------------------------------------------------
-    def sync_node(self, link, r):
-        name, online = r['node'], r.get('status') == 'online'
-        scope = Q(cluster__isnull=True) | Q(cluster=self.cluster)
-        device, ambiguous = match(link, Device.objects.filter(scope, site=self.conn.site), name, lambda d: True)
-        if ambiguous:
-            return 'ambiguous', ambiguous
-        fields = {'cluster': self.cluster, 'status': 'active' if online else 'offline'}
-        if online:
-            version = (self.client.get('nodes', name, 'status') or {}).get('pveversion', '')
-            m = re.search(r'pve-manager/(\d+\.\d+)', version)
-            if m:
-                fields['platform'] = get_or_create_named(Platform, f'Proxmox VE {m.group(1)}')
-        created = device is None
-        if created:
-            device = Device(name=name, site=self.conn.site, role=self.conn.node_role,
-                            device_type=self.conn.node_device_type, tenant=self.conn.tenant)
-            self.logger.info(_('Creating device %(name)s') % {'name': name})
-        changed = apply(device, **fields)
-        self.link_target(link, device)
-        if online:
-            changed |= self.sync_node_interfaces(device, self.client.get('nodes', name, 'network') or [])
-        return ('created', '') if created else ('ok-changed' if changed else 'ok', '')
-
-    def sync_node_interfaces(self, device, network):
-        """Create missing interfaces (existing ones keep their type) and sync their IPs."""
-        changed = False
-        for n in network:
-            if n.get('type') == 'alias' or not n.get('iface'):
-                continue
-            iface = device.interfaces.filter(name=n['iface']).first()
-            if iface is None:
-                iface = Interface(device=device, name=n['iface'], type=NODE_IFACE_TYPES.get(n.get('type'), 'other'))
-                changed |= apply(iface, enabled=bool(n.get('active', 1)), description=n.get('comments', '')[:200])
-            ips = [ip for ip in (usable_ip(n.get('cidr')), usable_ip(n.get('cidr6'))) if ip]
-            sync_ips(device, iface, ips, self.logger)
-        set_primary_ips(device, IPAddress.objects.filter(interface__device=device).order_by('pk'))
-        return changed
-
-    # -- guests --------------------------------------------------------------------------------
-    def sync_guest(self, link, r, name):
+    def fetch_guest(self, r):
         kind, vmid, node = r['type'], r['vmid'], r.get('node')
-        scope = Q(cluster__isnull=True) | Q(cluster=self.cluster)
-        vm, ambiguous = match(link, VirtualMachine.objects.filter(scope), name, lambda v: v.cluster_id == self.cluster.pk)
-        if ambiguous:
-            return 'ambiguous', ambiguous
+        payload = {'resource': r, 'config': None, 'live': None}
         try:
-            config = self.client.get('nodes', node, kind, vmid, 'config') or {}
-        except ProxmoxError as exc:  # e.g. node offline: keep what NetBox has, only update status/usage
-            config = None
-            self.logger.warning(f'{kind} {vmid} ({name}): {exc}')
-        fields = {
-            'name': name[:64], 'cluster': self.cluster, 'status': VM_STATUS.get(r.get('status'), 'offline'),
-            'device': self.host_for(vm, node, name),
-            'virtual_machine_type': get_or_create_named(VirtualMachineType, 'Proxmox ' + ('QEMU' if kind == 'qemu' else 'LXC')),
-            'vcpus': r.get('maxcpu') or None, 'memory': (r.get('maxmem') or 0) // MIB or None,
-        }
-        if config is not None:
-            platform = platform_name(config.get('ostype'))
-            fields['platform'] = get_or_create_named(Platform, platform) if platform else None
-            fields['start_on_boot'] = 'on' if str(config.get('onboot')) == '1' else 'off'
-            if kind == 'qemu':
-                fields['serial'] = parse_kv(config.get('smbios1')).get('uuid', '')[:50]
-        created = vm is None
-        if created:
-            vm = VirtualMachine(role=self.conn.vm_role if kind == 'qemu' else self.conn.container_role,
-                                tenant=self.conn.tenant)
-            self.logger.info(_('Creating virtual machine %(name)s') % {'name': name})
-        old_host = None if created else vm.device
-        changed = apply(vm, **fields)
-        if old_host and vm.device and old_host != vm.device:
-            self.counts['moved'] += 1
-            self.logger.info(_('%(name)s moved from %(old)s to %(new)s') % {'name': name, 'old': old_host,
-                                                                              'new': vm.device})
-        if vm.custom_field_data.get(CF_VMID) != vmid:
-            vm.snapshot()
-            vm.custom_field_data[CF_VMID] = vmid
-            vm.save()
-        self.link_target(link, vm)
-        add_tags(vm, r.get('tags'), self.logger)
-        if config is not None:
-            changed |= self.sync_disks(vm, parse_disks(config, kind))
-            changed |= self.sync_vm_interfaces(vm, parse_nics(config, kind), self.live_ips(kind, node, vmid, r))
-        return ('created', '') if created else ('ok-changed' if changed else 'ok', '')
-
-    def host_for(self, vm, node, name):
-        """Node device the guest currently runs on (follows migrations). If that node is not linked in NetBox,
-        keep the previous assignment instead of clearing it - as long as it still belongs to this cluster."""
-        host = self.node_devices.get(node)
-        if host and host.cluster_id == self.cluster.pk:
-            return host
-        self.logger.warning(_('%(name)s: node %(node)s is not linked to a device in cluster %(cluster)s – '
-                              'host assignment unchanged.') % {'name': name, 'node': node, 'cluster': self.cluster})
-        previous = vm.device if vm is not None else None
-        return previous if previous and previous.cluster_id == self.cluster.pk else None
+            payload['config'] = self.client.get('nodes', node, kind, vmid, 'config') or {}
+        except ProxmoxError as exc:  # e.g. node offline: keep what NetBox has, only status/usage
+            self.logger.warning(f'{kind} {vmid}: {exc}')
+        live = self.live_ips(kind, node, vmid, r)
+        if live is not None:
+            payload['live'] = {mac: [str(ip) for ip in ips] for mac, ips in live.items()}
+        return payload
 
     def live_ips(self, kind, node, vmid, r):
         """{mac: [ip]} from the guest, or None if not available (then IPs stay untouched)."""
@@ -465,11 +397,268 @@ class Sync:
             self.logger.debug(f'{kind} {vmid}: no IP data ({exc})')
             return None
 
+    def prepare(self, kind, pid, name, node, usage_fields, payload):
+        link, _created = ProxmoxObject.objects.get_or_create(
+            connection=self.conn, kind=kind, proxmox_id=str(pid), defaults={'state': 'new'})
+        link.name, link.node, link.last_seen, link.data = name, node, self.now, payload
+        for k, v in usage_fields.items():
+            setattr(link, k, v)
+        ambiguous = ''
+        if link.target is None:
+            obj, ambiguous = match(link, self.match_queryset(kind), name, self.narrow(kind))
+            if obj is not None:  # unique name match: link right away, NetBox itself is not changed here
+                setattr(link, 'device' if kind == 'node' else 'virtual_machine', obj)
+                self.logger.info(_('%(name)s linked to the existing NetBox object by name.') % {'name': name})
+        link.save()
+        if ambiguous:
+            ProxmoxObject.objects.filter(pk=link.pk).update(state='ambiguous', changes=[], message=ambiguous[:500])
+            self.counts['ambiguous'] += 1
+        else:
+            self.evaluate(link)
+
+    def evaluate(self, link):
+        """Preview the link and store state + pending changes."""
+        linked = link.target is not None
+        changes, error = self.preview(link)
+        state = 'error' if error else 'pending' if linked and changes else 'ok' if linked else 'new'
+        ProxmoxObject.objects.filter(pk=link.pk).update(state=state, changes=changes, message=error[:500])
+        self.counts[state] += 1
+        return state
+
+    def preview(self, link):
+        """Run the real write code in a savepoint and roll it back, recording what would change.
+        Runs without request context: no changelog entries, no webhooks/event rules."""
+        changes = []
+        token = _RECORD.set(changes)
+        self.dry = True
+        try:
+            with transaction.atomic():
+                self.process(link)
+                raise _Rollback
+        except _Rollback:
+            return changes, ''
+        except Exception as exc:  # noqa: BLE001 - shown as error state, the user decides
+            return changes, error_text(exc)
+        finally:
+            self.dry = False
+            _RECORD.reset(token)
+
+    def existing_cluster(self):
+        cid = type(self.conn).objects.filter(pk=self.conn.pk).values_list('cluster_id', flat=True).first()
+        if cid:
+            return Cluster.objects.filter(pk=cid).first()
+        return Cluster.objects.filter(name__iexact=self.cluster_name(), type__slug='proxmox-ve').first()
+
+    def cluster_name(self):
+        return self.conn.proxmox_objects.filter(kind='cluster').values_list('name', flat=True).first() or self.conn.name
+
+    def match_queryset(self, kind):
+        """Name matching only within this cluster or among objects without a cluster (never another cluster)."""
+        cluster = self.existing_cluster()
+        scope = Q(cluster__isnull=True) | Q(cluster=cluster) if cluster else Q(cluster__isnull=True)
+        if kind == 'node':
+            return Device.objects.filter(scope, site=self.conn.site)
+        return VirtualMachine.objects.filter(scope)
+
+    def narrow(self, kind):
+        cluster = self.existing_cluster()
+        return lambda obj: cluster is not None and obj.cluster_id == cluster.pk
+
+    def cluster_snapshot(self, name, nodes, storage):
+        online = [n for n in nodes if n.get('status') == 'online']
+        cpus = sum(n.get('maxcpu') or 0 for n in online)
+        ProxmoxObject.objects.update_or_create(connection=self.conn, kind='cluster', proxmox_id='cluster', defaults={
+            'name': name, 'state': 'ok', 'last_seen': self.now, 'cpu_count': cpus,
+            'cpu_usage': round(sum((n.get('cpu') or 0) * (n.get('maxcpu') or 0) for n in online) / cpus * 100, 1)
+            if cpus else None,
+            'mem_used': sum(n.get('mem') or 0 for n in online), 'mem_total': sum(n.get('maxmem') or 0 for n in online),
+            'disk_used': storage[0], 'disk_total': storage[1], 'uptime': None,
+        })
+
+    def mark_stale(self, seen):
+        """Gone from Proxmox: linked objects become stale (orphans), unlinked rows are dropped."""
+        for link in self.conn.proxmox_objects.exclude(kind='cluster'):
+            if (link.kind, link.proxmox_id) in seen:
+                continue
+            if link.target is None:
+                link.delete()
+            elif link.state != 'stale':
+                ProxmoxObject.objects.filter(pk=link.pk).update(
+                    state='stale', changes=[], message=_('No longer present in Proxmox'))
+                self.counts['stale'] += 1
+                self.logger.warning(f'{link.kind} {link.proxmox_id} ({link.name}): no longer present in Proxmox')
+
+    # == phase 2: write the fetched data to NetBox ===============================================
+    def write(self, links):
+        """Apply the stored data of the given links (nodes first). Ignored, ambiguous and stale ones are skipped."""
+        order = {'node': 0}
+        for link in sorted(links, key=lambda x: order.get(x.kind, 1)):
+            if link.ignored or link.kind == 'cluster' or link.state in ('ambiguous', 'stale') or not link.data:
+                self.counts['skipped'] += 1
+                continue
+            try:
+                with transaction.atomic():
+                    result = self.process(link)
+            except Exception as exc:  # noqa: BLE001 - one broken object must not stop the run
+                message = error_text(exc)
+                ProxmoxObject.objects.filter(pk=link.pk).update(state='error', message=message[:500])
+                self.counts['error'] += 1
+                self.logger.error(f'{link.kind} {link.proxmox_id} ({link.name}): {message}')
+                continue
+            ProxmoxObject.objects.filter(pk=link.pk).update(state='ok', changes=[], message='')
+            self.counts[result] += 1
+        return dict(self.counts)
+
+    def offline_stale(self):
+        """Daily run: NetBox objects whose Proxmox counterpart is gone are set offline (never deleted)."""
+        for link in self.conn.proxmox_objects.filter(state='stale'):
+            target = link.target
+            if target is not None and target.status != 'offline':
+                with transaction.atomic():
+                    apply(target, status='offline')
+                self.counts['offline'] += 1
+
+    def process(self, link):
+        """Write link.data to NetBox. Returns 'created' | 'updated' | 'unchanged'."""
+        self.cluster = self.ensure_cluster()
+        if link.kind == 'node':
+            return self.sync_node(link, link.data)
+        return self.sync_guest(link, link.data)
+
+    def ensure_cluster(self):
+        cluster = self.existing_cluster()
+        token = _RECORD.set(None)  # cluster bookkeeping is not part of one object's preview
+        try:
+            if cluster is None:
+                if self.user is not None and not self.user.has_perm('virtualization.add_cluster'):
+                    raise PermissionDenied(_('You are not allowed to create the cluster.'))
+                cluster = Cluster(type=get_or_create_named(ClusterType, 'Proxmox VE'), scope=self.conn.site,
+                                  tenant=self.conn.tenant)
+                self.log.info(_('Creating cluster %(name)s') % {'name': self.cluster_name()})
+            apply(cluster, name=self.cluster_name(), status='active')
+        finally:
+            _RECORD.reset(token)
+        if self.conn.cluster_id != cluster.pk:
+            type(self.conn).objects.filter(pk=self.conn.pk).update(cluster=cluster)
+        return cluster
+
+    def check_change(self, obj):
+        if self.user is not None and obj is not None and \
+                not type(obj).objects.restrict(self.user, 'change').filter(pk=obj.pk).exists():
+            raise PermissionDenied(_('You are not allowed to change %(obj)s.') % {'obj': obj})
+
+    def check_add(self, obj):
+        if self.user is not None and not type(obj).objects.restrict(self.user, 'add').filter(pk=obj.pk).exists():
+            raise PermissionDenied(_('You are not allowed to create %(obj)s.') % {'obj': obj})
+
+    @staticmethod
+    def link_target(link, obj):
+        field = 'device' if isinstance(obj, Device) else 'virtual_machine'
+        if getattr(link, field + '_id') != obj.pk:
+            setattr(link, field, obj)
+            link.save()
+
+    # -- nodes ---------------------------------------------------------------------------------
+    def sync_node(self, link, payload):
+        r = payload['resource']
+        name, online = r['node'], r.get('status') == 'online'
+        device = Device.objects.filter(pk=link.device_id).first() if link.device_id else None  # fresh copy
+        self.check_change(device)
+        fields = {'cluster': self.cluster, 'status': 'active' if online else 'offline'}
+        m = re.search(r'pve-manager/(\d+\.\d+)', payload.get('pveversion') or '')
+        if m:
+            fields['platform'] = get_or_create_named(Platform, f'Proxmox VE {m.group(1)}')
+        created = device is None
+        if created:
+            device = Device(name=name, site=self.conn.site, role=self.conn.node_role,
+                            device_type=self.conn.node_device_type, tenant=self.conn.tenant)
+            self.log.info(_('Creating device %(name)s') % {'name': name})
+        changed = apply(device, **fields)
+        if created:
+            self.check_add(device)
+        self.link_target(link, device)
+        if 'network' in payload:
+            changed |= self.sync_node_interfaces(device, payload['network'])
+        return 'created' if created else 'updated' if changed else 'unchanged'
+
+    def sync_node_interfaces(self, device, network):
+        """Create missing interfaces (existing ones keep their type) and sync their IPs."""
+        changed = False
+        for n in network:
+            if n.get('type') == 'alias' or not n.get('iface'):
+                continue
+            iface = device.interfaces.filter(name=n['iface']).first()
+            if iface is None:
+                iface = Interface(device=device, name=n['iface'], type=NODE_IFACE_TYPES.get(n.get('type'), 'other'))
+                changed |= apply(iface, enabled=bool(n.get('active', 1)), description=(n.get('comments') or '')[:200])
+            ips = [ip for ip in (usable_ip(n.get('cidr')), usable_ip(n.get('cidr6'))) if ip]
+            sync_ips(device, iface, ips, self.log)
+        set_primary_ips(device, IPAddress.objects.filter(interface__device=device).order_by('pk'))
+        return changed
+
+    # -- guests --------------------------------------------------------------------------------
+    def sync_guest(self, link, payload):
+        r, config = payload['resource'], payload.get('config')
+        kind, vmid, node, name = r['type'], r['vmid'], r.get('node'), link.name
+        vm = VirtualMachine.objects.filter(pk=link.virtual_machine_id).first() if link.virtual_machine_id else None
+        self.check_change(vm)
+        fields = {
+            'name': name, 'cluster': self.cluster, 'status': VM_STATUS.get(r.get('status'), 'offline'),
+            'device': self.host_for(vm, node, name),
+            'virtual_machine_type': get_or_create_named(VirtualMachineType, 'Proxmox ' + ('QEMU' if kind == 'qemu' else 'LXC')),
+            'vcpus': r.get('maxcpu') or None, 'memory': (r.get('maxmem') or 0) // MIB or None,
+        }
+        if config is not None:
+            platform = platform_name(config.get('ostype'))
+            fields['platform'] = get_or_create_named(Platform, platform) if platform else None
+            fields['start_on_boot'] = 'on' if str(config.get('onboot')) == '1' else 'off'
+            if kind == 'qemu':
+                fields['serial'] = parse_kv(config.get('smbios1')).get('uuid', '')[:50]
+        created = vm is None
+        if created:
+            vm = VirtualMachine(role=self.conn.vm_role if kind == 'qemu' else self.conn.container_role,
+                                tenant=self.conn.tenant)
+            self.log.info(_('Creating virtual machine %(name)s') % {'name': name})
+        old_host = None if created else vm.device
+        changed = apply(vm, **fields)
+        if created:
+            self.check_add(vm)
+        if old_host and vm.device and old_host != vm.device and not self.dry:
+            self.counts['moved'] += 1
+            self.log.info(_('%(name)s moved from %(old)s to %(new)s') % {'name': name, 'old': old_host, 'new': vm.device})
+        if vm.custom_field_data.get(CF_VMID) != vmid:
+            vm.snapshot()
+            vm.custom_field_data[CF_VMID] = vmid
+            vm.save()
+        self.link_target(link, vm)
+        add_tags(vm, r.get('tags'), self.log)
+        if config is not None:
+            changed |= self.sync_disks(vm, parse_disks(config, kind))
+            live = payload.get('live')
+            if live is not None:
+                live = {mac: [ipaddress.ip_interface(ip) for ip in ips] for mac, ips in live.items()}
+            changed |= self.sync_vm_interfaces(vm, parse_nics(config, kind), live)
+        return 'created' if created else 'updated' if changed else 'unchanged'
+
+    def host_for(self, vm, node, name):
+        """Node device the guest currently runs on (follows migrations). If that node is not linked in NetBox,
+        keep the previous assignment instead of clearing it - as long as it still belongs to this cluster."""
+        device_id = self.conn.proxmox_objects.filter(kind='node', proxmox_id=node, device__isnull=False) \
+            .values_list('device_id', flat=True).first()
+        host = Device.objects.filter(pk=device_id).first() if device_id else None
+        if host and host.cluster_id == self.cluster.pk:
+            return host
+        self.log.warning(_('%(name)s: node %(node)s is not linked to a device in cluster %(cluster)s – '
+                           'host assignment unchanged.') % {'name': name, 'node': node, 'cluster': self.cluster})
+        previous = vm.device if vm is not None else None
+        return previous if previous and previous.cluster_id == self.cluster.pk else None
+
     def sync_disks(self, vm, disks):
         changed = False
         wanted = dict(disks)
         for disk in vm.virtualdisks.all():
             if disk.name not in wanted and (QEMU_DISK.match(disk.name) or LXC_DISK.match(disk.name)):
+                record(f'− {_label(disk)}')
                 disk.snapshot()
                 disk.delete()
                 changed = True
@@ -482,7 +671,8 @@ class Sync:
         changed, budget = False, MAX_IPS_PER_VM
         wanted = {n['name'] for n in nics}
         for iface in vm.interfaces.filter(name__regex=r'^net\d+$').exclude(name__in=wanted):
-            sync_ips(vm, iface, [], self.logger)  # deleting the interface would delete its IPs
+            sync_ips(vm, iface, [], self.log)  # deleting the interface would delete its IPs
+            record(f'− {_label(iface)}')
             iface.snapshot()
             iface.delete()
             changed = True
@@ -495,36 +685,53 @@ class Sync:
                 if len(vlans) == 1:
                     fields.update(mode='access', untagged_vlan=vlans[0])
             changed |= apply(iface, **fields)
-            if nic['mac'] and str(getattr(iface.primary_mac_address, 'mac_address', '')).lower() != nic['mac']:
+            old_mac = str(getattr(iface.primary_mac_address, 'mac_address', '') or '').lower()
+            if nic['mac'] and old_mac != nic['mac']:
                 iface.set_primary_mac_address_from_value(nic['mac'])
+                record(f'{_label(iface)}: MAC {_fmt(old_mac)} → {nic["mac"]}')
                 changed = True
             ips = live.get(nic['mac'], []) if live is not None else (
                 [ip for ip in map(usable_ip, nic['static']) if ip] or None)
             if ips is not None:
                 limit = min(MAX_IPS_PER_IFACE, budget)
                 if len(ips) > limit:
-                    self.logger.warning(_('%(vm)s %(iface)s: %(n)d IP addresses reported, only %(limit)d taken.') % {
+                    self.log.warning(_('%(vm)s %(iface)s: %(n)d IP addresses reported, only %(limit)d taken.') % {
                         'vm': vm, 'iface': nic['name'], 'n': len(ips), 'limit': limit})
                     ips = ips[:limit]
                 budget -= len(ips)
-                sync_ips(vm, iface, ips, self.logger, guest=True)
+                sync_ips(vm, iface, ips, self.log, guest=True)
         set_primary_ips(vm, IPAddress.objects.filter(vminterface__virtual_machine=vm).order_by('pk'))
         return changed
 
-    # -- stale ---------------------------------------------------------------------------------
-    def mark_stale(self, seen):
-        for link in self.conn.proxmox_objects.exclude(kind='cluster').exclude(state='stale'):
-            if (link.kind, link.proxmox_id) in seen:
-                continue
-            target = link.target
-            with transaction.atomic():
-                if target is not None:
-                    apply(target, status='offline')
-                link.state, link.message = 'stale', _('No longer present in Proxmox')
-                link.save()
-            self.counts['stale'] += 1
-            self.logger.warning(f'{link.kind} {link.proxmox_id} ({link.name}): ' + link.message)
+
+# -- entry points ----------------------------------------------------------------------------
+def discover(conn, client, logger):
+    """Fetch from Proxmox; writes only ProxmoxObject (state, pending changes, usage)."""
+    return Sync(conn, logger, client=client).discover()
 
 
-def sync_connection(conn, client, logger):
-    return Sync(conn, client, logger).run()
+def write_objects(links, logger, user=None):
+    """Apply the fetched data of the given ProxmoxObjects. user=None: system run without permission checks."""
+    counts = Counter()
+    by_conn = {}
+    for link in links:
+        by_conn.setdefault(link.connection, []).append(link)
+    for conn, items in by_conn.items():
+        counts.update(Sync(conn, logger, user=user).write(items))
+    return dict(counts)
+
+
+def assign(link, target, logger):
+    """Link a Proxmox object to an existing NetBox object (manual). Only the link is stored; the pending
+    changes are previewed and written by the next sync."""
+    field = 'device' if link.kind == 'node' else 'virtual_machine'
+    model = Device if link.kind == 'node' else VirtualMachine
+    if not isinstance(target, model):
+        raise ValidationError(_('A %(kind)s can only be assigned to a %(model)s.') % {
+            'kind': link.get_kind_display(), 'model': model._meta.verbose_name})
+    other = ProxmoxObject.objects.filter(**{field: target}).exclude(pk=link.pk).first()
+    if other is not None:
+        raise ValidationError(_('%(obj)s is already linked to %(other)s.') % {'obj': target, 'other': other})
+    setattr(link, field, target)
+    link.save()
+    return Sync(link.connection, logger).evaluate(link)

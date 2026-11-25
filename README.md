@@ -8,7 +8,15 @@ MAC and IP addresses and a daily usage snapshot.
 
 ## Features
 
-- **Multiple Proxmox connections** (one per cluster or standalone node), each with *Test connection* and *Sync now*.
+- **Fetch, review, then sync:** *Fetch from Proxmox* only reads Proxmox – nothing is created or changed in NetBox.
+  The **sync overview** lists every node, VM and container with its state and the **pending changes** field by field
+  (e.g. `memory 4096 → 8192`, `device pve-a → pve-b`, `+ virtual disk scsi1`). Tick one or more objects and
+  *Sync selected* creates or updates exactly those; or *Assign* a Proxmox object to an existing NetBox object, or
+  *Ignore* it.
+- **Orphans:** NetBox VMs and nodes in a Proxmox cluster without Proxmox counterpart (deleted in Proxmox, or never
+  linked) – *Assign* to a Proxmox object, *Ignore*, or *Decommission selected*.
+- **Multiple Proxmox connections** (one per cluster or standalone node), each with *Test connection* and
+  *Fetch from Proxmox*.
 - **Cluster** → NetBox cluster (type *Proxmox VE*), found by name or created.
 - **Nodes** → devices in that cluster: status, platform *Proxmox VE x.y*, interfaces (bridges, bonds, VLANs) with IPs,
   primary IP. Missing nodes are created with the defaults of the connection (site, role, device type).
@@ -22,8 +30,8 @@ MAC and IP addresses and a daily usage snapshot.
   - Interfaces `net0…` with MAC address, MTU, enabled state, bridge, and untagged VLAN (only if exactly one
     matching VLAN exists).
   - IP addresses from the QEMU guest agent or the LXC runtime (stopped containers: static IPs from the config).
-- **Matching:** stored link (VMID) → unique name → create. Existing objects are matched by name and updated, never
-  duplicated. Name matching only considers objects without a cluster or in this Proxmox cluster (nodes: also only at
+- **Matching:** stored link (VMID) → unique name → new. A unique name match is linked right away when fetching (the
+  NetBox object itself is only changed when it is synced), so existing objects are never duplicated. Name matching only considers objects without a cluster or in this Proxmox cluster (nodes: also only at
   the connection's site) – a same-named VM in another cluster (e.g. VMware) is never taken over. If a name is
   ambiguous, the object is left alone and reported.
 - **The Proxmox VMID is stored** in the plugin's link table (key: connection + VMID, because VMIDs are only unique
@@ -35,13 +43,16 @@ MAC and IP addresses and a daily usage snapshot.
   another object are skipped. IPs no longer reported are unassigned, never deleted. Primary IPv4/IPv6 is only
   set when it is empty. IPs reported from inside a guest (guest agent, container) are capped at 16 per interface
   and 64 per VM, and never claim an IP documented as *reserved* or *deprecated*.
-- **Gone from Proxmox:** objects are set to *offline* and marked *stale* in the sync overview – never deleted.
+- **Gone from Proxmox:** objects are marked *stale*, listed as orphans and set *offline* by the daily run – never
+  deleted.
 - **Usage snapshot** (daily): CPU %, memory and storage used/total per node, VM and container, plus the cluster
   total (shared storage counted once). It is shown in a *Proxmox* card on devices, VMs and clusters, next to
   the resources allocated to active VMs.
 - **Changelog:** all changes appear in the NetBox changelog. Scheduled runs use the inactive service user
   `proxmox-sync`, manual runs the user who started them.
-- **Sync overview** with filters (connection, type, state) to clean up *ambiguous*, *error* and *stale* entries.
+- **Daily run:** fetches all enabled connections and updates the **already linked** objects with pending changes
+  (CPU, memory, disks, node, IPs, usage). New Proxmox objects are **never created automatically** – they wait in
+  the sync overview. Ignored objects are never written.
 - Read-only: the plugin never writes to Proxmox.
 
 ## Requirements
@@ -52,21 +63,21 @@ MAC and IP addresses and a daily usage snapshot.
 ## Installation
 
 The plugin is not published on PyPI. Install it from the GitHub release archive – this works without `git`,
-also in the netbox-docker image. Replace `v0.1.1` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
+also in the netbox-docker image. Replace `v0.2.0` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
 
 **NetBox installed from source (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
 
 # keep the plugin when NetBox is upgraded (upgrade.sh reinstalls local_requirements.txt)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** add to `plugin_requirements.txt`
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.1.1.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
 ```
 
 and to `Dockerfile-Plugins` (build `netbox`, `netbox-worker` and `netbox-housekeeping` from it via `docker-compose.override.yml`):
@@ -140,13 +151,17 @@ name or IP). The connection page shows a warning while verification is off.
 ## Usage
 
 - *Test connection* on the connection page shows the Proxmox VE version.
-- *Sync now* starts a sync of this connection as a background job (log under *Jobs*). The system job syncs all
-  enabled connections every `sync_interval_min` minutes.
-- *Plugins → Proxmox sync overview* lists every Proxmox object with its NetBox object, state and usage.
-  Typical follow-ups:
-  - *ambiguous*: rename or merge the duplicate NetBox objects; the next sync links them.
-  - *error*: the message shows the validation error (e.g. node device at another site than the cluster).
-  - *stale*: the object no longer exists in Proxmox – decommission or delete it in NetBox.
+1. *Plugins → Sync overview → Fetch from Proxmox* (or the button on a connection) reads Proxmox in the background
+   (log under *Jobs*). Nothing changes in NetBox.
+2. Review the list. States: *New* (no NetBox object), *Changes pending* (linked, the column lists what would
+   change), *In sync*, *Ambiguous* (several NetBox objects with that name – use *Assign*), *Error* (the message
+   shows why, e.g. a missing permission or a validation error), *Gone from Proxmox*.
+3. Tick objects and *Sync selected*. Sync nodes together with (or before) their VMs, so the VMs get their host.
+4. *Assign* links a Proxmox object to an existing NetBox object; *Ignore* hides it from syncs (filter *Ignored*).
+5. *Plugins → Proxmox orphans* lists NetBox VMs/nodes without Proxmox counterpart (tabs *VMs and containers* /
+   *Nodes*).
+
+The system job runs every `sync_interval_min` minutes (see *Daily run* above).
 
 ## Permissions
 
@@ -155,7 +170,9 @@ name or IP). The connection page shows a warning while verification is off.
 | View connections | `netbox_proxmox.view_proxmoxconnection` |
 | Add/edit/delete connections, test connection | **Superuser** (the connection decides where the token is sent) |
 | View sync overview and *Proxmox* cards | `netbox_proxmox.view_proxmoxobject` |
-| *Sync now* | `netbox_proxmox.change_proxmoxobject` |
+| Fetch, sync selected, assign, ignore | `netbox_proxmox.change_proxmoxobject`, plus `add`/`change` on the NetBox device/VM (constraints apply) |
+| Ignore orphans | `netbox_proxmox.change_ignoredorphan` |
+| Decommission orphans | `change` on the device/VM |
 
 ## Language
 
@@ -164,6 +181,9 @@ The UI is in English with a German translation. NetBox uses the language of the 
 ## Upgrade
 
 Install the new release archive (see Installation), run `manage.py migrate` and restart `netbox` and `netbox-rq`.
+
+**0.1.x → 0.2.0:** the sync no longer creates new objects automatically. After the upgrade, *Fetch from Proxmox*
+once; already synced objects show *In sync*, new ones wait in the sync overview.
 
 ## License
 

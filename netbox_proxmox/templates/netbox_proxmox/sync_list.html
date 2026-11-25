@@ -1,0 +1,25 @@
+{% extends 'generic/object_list.html' %}
+{% load i18n %}
+
+{% block extra_controls %}
+  <div class="btn-group" role="group">
+    {% with current=request.GET.ignored %}
+      <a href="?ignored=false" class="btn btn-outline-secondary{% if current == 'false' %} active{% endif %}">{% trans "Active" %}</a>
+      <a href="?ignored=true" class="btn btn-outline-secondary{% if current == 'true' %} active{% endif %}">{% trans "Ignored" %}</a>
+    {% endwith %}
+  </div>
+  {% if perms.netbox_proxmox.change_proxmoxobject %}
+    <form method="post" action="{% url 'plugins:netbox_proxmox:fetch' %}" class="d-flex gap-1">
+      {% csrf_token %}
+      {% if connections|length > 1 %}
+        <select name="connection_id" class="form-select" aria-label="{% trans "Connection" %}">
+          <option value="">{% trans "All connections" %}</option>
+          {% for c in connections %}<option value="{{ c.pk }}">{{ c }}</option>{% endfor %}
+        </select>
+      {% endif %}
+      <button type="submit" class="btn btn-primary text-nowrap" title="{% trans "Fetches data from Proxmox. Nothing is changed in NetBox until you sync selected objects." %}">
+        <i class="mdi mdi-cloud-download" aria-hidden="true"></i> {% trans "Fetch from Proxmox" %}
+      </button>
+    </form>
+  {% endif %}
+{% endblock extra_controls %}

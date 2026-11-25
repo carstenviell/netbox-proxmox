@@ -84,8 +84,9 @@ class ProxmoxObject(models.Model):
     Key is (connection, kind, proxmox_id): VMIDs are only unique within one Proxmox cluster."""
     KIND_CHOICES = [('cluster', _('Cluster')), ('node', _('Node')), ('qemu', _('VM (QEMU)')), ('lxc', _('Container (LXC)'))]
     STATE_CHOICES = [
+        ('new', _('New')),
+        ('pending', _('Changes pending')),
         ('ok', _('In sync')),
-        ('created', _('Created')),
         ('ambiguous', _('Ambiguous')),
         ('error', _('Error')),
         ('stale', _('Gone from Proxmox')),
@@ -105,6 +106,10 @@ class ProxmoxObject(models.Model):
     state = models.CharField(verbose_name=_('state'), max_length=10, choices=STATE_CHOICES)
     message = models.CharField(verbose_name=_('message'), max_length=500, blank=True)
     last_seen = models.DateTimeField(verbose_name=_('last seen'), null=True, blank=True)
+    ignored = models.BooleanField(verbose_name=_('ignored'), default=False,
+                                  help_text=_('Never written to NetBox, also not by the daily sync'))
+    data = models.JSONField(verbose_name=_('fetched data'), default=dict, blank=True, editable=False)
+    changes = models.JSONField(verbose_name=_('pending changes'), default=list, blank=True, editable=False)
 
     # Usage snapshot from the last sync (bytes / percent / seconds)
     cpu_usage = models.FloatField(verbose_name=_('CPU usage (%)'), null=True, blank=True)
@@ -132,3 +137,26 @@ class ProxmoxObject(models.Model):
     @property
     def target(self):
         return self.device or self.virtual_machine
+
+
+class IgnoredOrphan(models.Model):
+    """A NetBox device/VM without Proxmox counterpart that should not be listed as orphan."""
+    device = models.OneToOneField(to='dcim.Device', null=True, blank=True, on_delete=models.CASCADE,
+                                  related_name='proxmox_ignored')
+    virtual_machine = models.OneToOneField(to='virtualization.VirtualMachine', null=True, blank=True,
+                                           on_delete=models.CASCADE, related_name='proxmox_ignored')
+    note = models.CharField(verbose_name=_('note'), max_length=255, blank=True)
+    created = models.DateTimeField(verbose_name=_('ignored since'), auto_now_add=True)
+
+    objects = RestrictedQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = _('ignored Proxmox orphan')
+        verbose_name_plural = _('ignored Proxmox orphans')
+        constraints = [models.CheckConstraint(
+            condition=models.Q(device__isnull=False, virtual_machine__isnull=True)
+            | models.Q(device__isnull=True, virtual_machine__isnull=False),
+            name='netbox_proxmox_ignoredorphan_one_object')]
+
+    def __str__(self):
+        return str(self.device or self.virtual_machine)

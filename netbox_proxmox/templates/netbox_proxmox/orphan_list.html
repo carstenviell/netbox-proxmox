@@ -1,0 +1,13 @@
+{% extends 'generic/object_list.html' %}
+{% load i18n %}
+
+{% block extra_controls %}
+  <div class="btn-group" role="group">
+    <a href="{% url 'plugins:netbox_proxmox:orphan_list' kind='vms' %}" class="btn btn-outline-secondary{% if kind == 'vms' %} active{% endif %}">{% trans "VMs and containers" %}</a>
+    <a href="{% url 'plugins:netbox_proxmox:orphan_list' kind='devices' %}" class="btn btn-outline-secondary{% if kind == 'devices' %} active{% endif %}">{% trans "Nodes" %}</a>
+  </div>
+  <div class="btn-group" role="group">
+    <a href="?" class="btn btn-outline-secondary{% if not show_ignored %} active{% endif %}">{% trans "Open" %}</a>
+    <a href="?ignored=true" class="btn btn-outline-secondary{% if show_ignored %} active{% endif %}">{% trans "Ignored" %}</a>
+  </div>
+{% endblock extra_controls %}
