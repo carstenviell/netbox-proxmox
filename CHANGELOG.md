@@ -6,9 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 ### Open
-- Verify against a real Proxmox VE instance (so far tested with mocked API answers only).
+- Verify against a real Proxmox VE instance (so far tested with mocked API answers only); release 0.1.0 afterwards.
 
-## [0.1.0] – 2026-11-25
 ### Added
 - Proxmox connections (multiple, token secret via `PROXMOX_*` environment variable, superuser-only editing) with *Test connection* and *Sync now*.
 - Sync of cluster, nodes (devices incl. interfaces/IPs), VMs and LXC containers (virtual machines incl. node assignment that follows migrations, disks, interfaces with MAC, VLAN and IPs, platform, VM type, start on boot, serial, tags).

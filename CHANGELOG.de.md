@@ -6,9 +6,8 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 ### Offen
-- Gegen eine echte Proxmox-VE-Instanz verifizieren (bisher nur mit nachgebildeten API-Antworten getestet).
+- Gegen eine echte Proxmox-VE-Instanz verifizieren (bisher nur mit nachgebildeten API-Antworten getestet), danach Release 0.1.0.
 
-## [0.1.0] – 2026-11-25
 ### Neu
 - Proxmox-Verbindungen (mehrere, Token-Secret per Umgebungsvariable `PROXMOX_*`, Bearbeiten nur für Superuser) mit *Verbindung testen* und *Jetzt abgleichen*.
 - Abgleich von Cluster, Nodes (Geräte inkl. Interfaces/IPs), VMs und LXC-Containern (virtuelle Maschinen inkl. Node-Zuordnung, die Migrationen folgt, Disks, Interfaces mit MAC, VLAN und IPs, Plattform, VM-Typ, Autostart, Seriennummer, Tags).
