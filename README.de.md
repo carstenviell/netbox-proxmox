@@ -69,21 +69,21 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
 ## Installation
 
 Das Plugin ist nicht auf PyPI veröffentlicht. Installiert wird es aus dem GitHub-Release-Archiv. Das funktioniert
-ohne `git`, auch im netbox-docker-Image. `v0.2.0` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
+ohne `git`, auch im netbox-docker-Image. `v0.2.1` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
 
 **NetBox aus dem Quellcode (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
 
 # Plugin bei NetBox-Upgrades behalten (upgrade.sh installiert local_requirements.txt neu)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** in `plugin_requirements.txt` eintragen
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
 ```
 
 und in `Dockerfile-Plugins` (daraus `netbox`, `netbox-worker` und `netbox-housekeeping` über `docker-compose.override.yml` bauen):

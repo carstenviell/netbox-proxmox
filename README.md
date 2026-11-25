@@ -63,21 +63,21 @@ MAC and IP addresses and a daily usage snapshot.
 ## Installation
 
 The plugin is not published on PyPI. Install it from the GitHub release archive – this works without `git`,
-also in the netbox-docker image. Replace `v0.2.0` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
+also in the netbox-docker image. Replace `v0.2.1` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
 
 **NetBox installed from source (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
 
 # keep the plugin when NetBox is upgraded (upgrade.sh reinstalls local_requirements.txt)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** add to `plugin_requirements.txt`
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.0.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
 ```
 
 and to `Dockerfile-Plugins` (build `netbox`, `netbox-worker` and `netbox-housekeeping` from it via `docker-compose.override.yml`):

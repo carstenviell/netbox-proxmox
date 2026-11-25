@@ -6,6 +6,10 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 
+## [0.2.1] – 2026-11-25
+### Behoben
+- Die Sync-Übersicht brach mit `TypeError: args or kwargs must be provided` (Server Error) ab, sobald ein Objekt ausstehende Änderungen hatte (z. B. neue Objekte nach dem ersten Abruf). Ursache: `format_html()` ohne Argumente, seit Django 6 (NetBox 4.7) ein Fehler. Regressionstest ergänzt.
+
 ## [0.2.0] – 2026-11-25
 ### Geändert
 - **Abrufen und Synchronisieren getrennt:** *Von Proxmox abrufen* (vorher *Jetzt abgleichen*) liest nur aus Proxmox und schreibt nichts in NetBox. Neue Objekte werden nur angelegt, wenn sie in der Sync-Übersicht ausgewählt werden; der tägliche Lauf aktualisiert bereits verknüpfte Objekte, legt aber nie neue an.

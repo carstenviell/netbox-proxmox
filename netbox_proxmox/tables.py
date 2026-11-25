@@ -1,6 +1,7 @@
 import django_tables2 as tables
 from django.template.defaultfilters import filesizeformat
 from django.utils.html import format_html, format_html_join
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from dcim.tables import DeviceTable
@@ -65,7 +66,8 @@ class ProxmoxObjectTable(NetBoxTable):
         changes = record.changes or []
         if not changes:
             return '—'
-        shown = format_html_join(format_html('<br>'), '{}', ((c,) for c in changes[:SHOWN_CHANGES]))
+        # constant separator: format_html() without arguments raises TypeError since Django 6 (NetBox 4.7)
+        shown = format_html_join(mark_safe('<br>'), '{}', ((c,) for c in changes[:SHOWN_CHANGES]))
         more = len(changes) - SHOWN_CHANGES
         if more <= 0:
             return format_html('<span class="small">{}</span>', shown)

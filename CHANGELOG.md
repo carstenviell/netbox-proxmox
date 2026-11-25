@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.2.1] – 2026-11-25
+### Fixed
+- Sync overview failed with `TypeError: args or kwargs must be provided` (Server Error) as soon as an object had pending changes (e.g. new objects after the first fetch). Cause: `format_html()` without arguments, an error since Django 6 (NetBox 4.7). Regression test added.
+
 ## [0.2.0] – 2026-11-25
 ### Changed
 - **Fetch and sync are separate:** *Fetch from Proxmox* (formerly *Sync now*) only reads Proxmox and writes nothing to NetBox. New objects are created only when selected in the sync overview; the daily run updates already linked objects but never creates new ones.

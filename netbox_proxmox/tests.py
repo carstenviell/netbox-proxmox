@@ -462,6 +462,16 @@ class ActionViewTests(TestCase):
             self.client.post('/plugins/proxmox/sync/fetch/')
         self.assertEqual(enqueue.call_args.kwargs['mode'], 'fetch')
 
+    def test_overview_renders_pending_changes(self):
+        """Rows with a change list (state new) - the 0.2.0 overview crashed on these (format_html without args)."""
+        grant(self.user, ProxmoxObject, ['view'])
+        many = ProxmoxObject.objects.get(proxmox_id='101')
+        self.assertGreater(len(many.changes), 3)  # also covers the "+ n more" branch
+        response = self.client.get('/plugins/proxmox/sync/')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '+ virtual machine web01')
+        self.assertContains(response, '<br>')
+
     def test_bulk_ignore_and_unignore(self):
         pk = ProxmoxObject.objects.get(proxmox_id='101').pk
         self.client.post('/plugins/proxmox/sync/bulk-ignore/', {'pk': [pk]})
