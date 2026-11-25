@@ -5,8 +5,9 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
-### Open
-- Verify against a real Proxmox VE instance (so far tested with mocked API answers only); release 0.1.0 afterwards.
+
+## [0.1.0] – 2026-11-25
+Verified against Proxmox VE 9.2 (2 nodes, 4 VMs, 19 LXC containers).
 
 ### Added
 - Proxmox connections (multiple, token secret via `PROXMOX_*` environment variable, superuser-only editing) with *Test connection* and *Sync now*.

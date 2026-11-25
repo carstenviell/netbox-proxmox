@@ -5,8 +5,9 @@
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionen nach [SemVer](https://semver.org/lang/de/).
 
 ## [Unveröffentlicht]
-### Offen
-- Gegen eine echte Proxmox-VE-Instanz verifizieren (bisher nur mit nachgebildeten API-Antworten getestet), danach Release 0.1.0.
+
+## [0.1.0] – 2026-11-25
+Getestet mit Proxmox VE 9.2 (2 Nodes, 4 VMs, 19 LXC-Container).
 
 ### Neu
 - Proxmox-Verbindungen (mehrere, Token-Secret per Umgebungsvariable `PROXMOX_*`, Bearbeiten nur für Superuser) mit *Verbindung testen* und *Jetzt abgleichen*.
