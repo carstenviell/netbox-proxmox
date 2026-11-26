@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.3.0] – 2026-11-26
+### Added
+- **Name suggestions:** if a Proxmox VM/container/node has no exact name match but exactly one unlinked NetBox object
+  with the same name apart from upper/lower case, or with the same name in another cluster, the sync overview shows
+  it as *Suggestion* with the buttons *Accept* and *Reject*. Accepting links the object (name and cluster from
+  Proxmox appear as pending changes); rejecting is remembered and the object is treated as new. Migration `0005`.
+
+### Changed
+- Automatic linking by name now requires exactly the same name (case-sensitive); names that differ only in case
+  become a suggestion instead of being linked silently.
+- *Sync selected* skips suggestions: before, a VM whose namesake was in another cluster was created a second time.
+
 ## [0.2.2] – 2026-11-26
 ### Security
 - *Sync selected* now checks the permissions of the requesting user on **every** object the sync creates, changes or deletes (IP addresses, VM interfaces, virtual disks, MAC addresses, tags, platforms, VM types, cluster type, cluster), including constraints – before, only the device/VM itself was checked, so e.g. IPs could be created without IPAM permissions. A missing permission rolls back the whole object (*Error* with reason). The daily run is unchanged.

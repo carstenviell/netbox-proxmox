@@ -10,7 +10,7 @@ from virtualization.tables import VirtualMachineTable
 
 from .models import ProxmoxConnection, ProxmoxObject
 
-STATE_COLORS = {'new': 'info', 'pending': 'warning', 'ok': 'success', 'ambiguous': 'warning', 'error': 'danger',
+STATE_COLORS = {'new': 'info', 'pending': 'warning', 'ok': 'success', 'ambiguous': 'warning', 'suggested': 'info', 'error': 'danger',
                 'stale': 'secondary'}
 SHOWN_CHANGES = 3
 
@@ -40,6 +40,7 @@ class ProxmoxObjectTable(NetBoxTable):
     connection = tables.Column(linkify=True)
     target = tables.Column(empty_values=(), orderable=False, verbose_name=_('NetBox object'))
     state = tables.Column()
+    suggestion = tables.Column(empty_values=(), orderable=False, verbose_name=_('Suggestion'))
     changes = tables.Column(empty_values=(), orderable=False, verbose_name=_('Pending changes'))
     ignored = columns.BooleanColumn(verbose_name=_('Ignored'))
     row_actions = tables.TemplateColumn(template_name='netbox_proxmox/inc/row_actions.html', orderable=False,
@@ -49,9 +50,9 @@ class ProxmoxObjectTable(NetBoxTable):
 
     class Meta(NetBoxTable.Meta):
         model = ProxmoxObject
-        fields = ('pk', 'connection', 'kind', 'proxmox_id', 'name', 'node', 'target', 'state', 'changes', 'message',
-                  'ignored', 'cpu_usage', 'cpu_count', 'memory', 'disk', 'last_seen', 'row_actions')
-        default_columns = ('kind', 'proxmox_id', 'name', 'node', 'target', 'state', 'changes', 'cpu_usage',
+        fields = ('pk', 'connection', 'kind', 'proxmox_id', 'name', 'node', 'target', 'suggestion', 'state', 'changes',
+                  'message', 'ignored', 'cpu_usage', 'cpu_count', 'memory', 'disk', 'last_seen', 'row_actions')
+        default_columns = ('kind', 'proxmox_id', 'name', 'node', 'target', 'suggestion', 'state', 'changes', 'cpu_usage',
                            'memory', 'last_seen', 'row_actions')
 
     user = None
@@ -67,6 +68,17 @@ class ProxmoxObjectTable(NetBoxTable):
         if self.user is None or not type(target).objects.restrict(self.user, 'view').filter(pk=target.pk).exists():
             return format_html('<span class="text-muted">{}</span>', _('(no access)'))
         return format_html('<a href="{}">{}</a>', target.get_absolute_url(), target)
+
+    def render_suggestion(self, record):
+        if not record.suggested_pk or record.state != 'suggested':
+            return '—'
+        obj = record.target_model.objects.restrict(self.user, 'view').filter(pk=record.suggested_pk).first() \
+            if self.user is not None else None
+        if obj is None:
+            return format_html('<span class="text-muted">{}</span>', _('(no access)'))
+        cluster = getattr(obj, 'cluster', None)
+        return format_html('<a href="{}">{}</a> <span class="text-muted small">({})</span>', obj.get_absolute_url(),
+                           obj, cluster or _('no cluster'))
 
     def render_state(self, record):
         return format_html('<span class="badge text-bg-{}" title="{}">{}</span>',

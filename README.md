@@ -30,10 +30,17 @@ MAC and IP addresses and a daily usage snapshot.
   - Interfaces `net0…` with MAC address, MTU, enabled state, bridge, and untagged VLAN (only if exactly one
     matching VLAN exists).
   - IP addresses from the QEMU guest agent or the LXC runtime (stopped containers: static IPs from the config).
-- **Matching:** stored link (VMID) → unique name → new. A unique name match is linked right away when fetching (the
-  NetBox object itself is only changed when it is synced), so existing objects are never duplicated. Name matching only considers objects without a cluster or in this Proxmox cluster (nodes: also only at
-  the connection's site) – a same-named VM in another cluster (e.g. VMware) is never taken over. If a name is
-  ambiguous, the object is left alone and reported.
+- **Matching:** stored link (VMID) → unique exact name → suggestion → new. A unique match with exactly the same
+  name is linked right away when fetching (the NetBox object itself is only changed when it is synced). Automatic
+  name matching only considers objects without a cluster or in this Proxmox cluster (nodes: also only at the
+  connection's site) – a same-named VM in another cluster (e.g. VMware) is never taken over automatically. If a name
+  is ambiguous, the object is left alone and reported.
+- **Suggestions:** if exactly one unlinked NetBox object has the same name apart from upper/lower case, or the same
+  name in another cluster, it is shown as a *Suggestion* instead of creating a duplicate. *Accept* links it (the
+  sync then applies name and cluster from Proxmox, shown as pending changes first), *Reject* remembers the decision
+  and the object is treated as new. Suggestions are skipped by *Sync selected* until decided. NetBox does not allow
+  two VMs in one cluster whose names differ only in case: rejecting such a suggestion leads to *Error* until one of
+  them is renamed.
 - **The Proxmox VMID is stored** in the plugin's link table (key: connection + VMID, because VMIDs are only unique
   per cluster). It is also shown in the read-only custom field `proxmox_vmid` on VMs. The link survives renames
   and migrations.
@@ -154,7 +161,8 @@ name or IP). The connection page shows a warning while verification is off.
 1. *Plugins → Sync overview → Fetch from Proxmox* (or the button on a connection) reads Proxmox in the background
    (log under *Jobs*). Nothing changes in NetBox.
 2. Review the list. States: *New* (no NetBox object), *Changes pending* (linked, the column lists what would
-   change), *In sync*, *Ambiguous* (several NetBox objects with that name – use *Assign*), *Error* (the message
+   change), *In sync*, *Ambiguous* (several NetBox objects with that name – use *Assign*), *Suggestion* (a NetBox object with the
+   same name apart from case or in another cluster – *Accept* or *Reject*), *Error* (the message
    shows why, e.g. a missing permission or a validation error), *Gone from Proxmox*.
 3. Tick objects and *Sync selected*. Sync nodes together with (or before) their VMs, so the VMs get their host.
 4. *Assign* links a Proxmox object to an existing NetBox object; *Ignore* hides it from syncs (filter *Ignored*).

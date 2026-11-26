@@ -338,7 +338,7 @@ def match(link, queryset, name, narrow):
     object of another cluster that just happens to have the same name."""
     if link.target:
         return link.target, None
-    candidates = list(queryset.filter(name__iexact=name, proxmox_object__isnull=True)[:20])
+    candidates = list(queryset.filter(name=name, proxmox_object__isnull=True)[:20])  # exact only, see suggest()
     if len(candidates) > 1:
         narrowed = [c for c in candidates if narrow(c)]
         if len(narrowed) == 1:
@@ -346,6 +346,14 @@ def match(link, queryset, name, narrow):
         return None, _('%(n)d NetBox objects named %(name)s – assign manually or rename.') % {
             'n': len(candidates), 'name': name}
     return (candidates[0] if candidates else None), None
+
+
+def suggest(queryset, name, rejected):
+    """The one not yet linked object whose name matches apart from case - in any cluster. Only shown as a
+    suggestion: the user decides (and needs change permission on it), nothing is linked automatically."""
+    candidates = list(queryset.filter(name__iexact=name, proxmox_object__isnull=True)
+                      .exclude(pk__in=rejected or []).values_list('pk', flat=True)[:2])
+    return candidates[0] if len(candidates) == 1 else None
 
 
 # -- sync ------------------------------------------------------------------------------------
@@ -433,15 +441,23 @@ class Sync:
         for k, v in usage_fields.items():
             setattr(link, k, v)
         ambiguous = ''
+        link.suggested_pk = None
         if link.target is None:
             obj, ambiguous = match(link, self.match_queryset(kind), name, self.narrow(kind))
             if obj is not None:  # unique name match: link right away, NetBox itself is not changed here
                 setattr(link, 'device' if kind == 'node' else 'virtual_machine', obj)
                 self.logger.info(_('%(name)s linked to the existing NetBox object by name.') % {'name': name})
+            elif not ambiguous:
+                link.suggested_pk = suggest(self.suggest_queryset(kind), name, link.rejected_pks)
         link.save()
         if ambiguous:
             ProxmoxObject.objects.filter(pk=link.pk).update(state='ambiguous', changes=[], message=ambiguous[:500])
             self.counts['ambiguous'] += 1
+        elif link.suggested_pk:
+            ProxmoxObject.objects.filter(pk=link.pk).update(state='suggested', changes=[], message=_(
+                'A NetBox object with this name apart from case or in another cluster exists – accept or reject '
+                'the suggestion.'))
+            self.counts['suggested'] += 1
         else:
             self.evaluate(link)
 
@@ -489,6 +505,10 @@ class Sync:
             return Device.objects.filter(scope, site=self.conn.site)
         return VirtualMachine.objects.filter(scope)
 
+    def suggest_queryset(self, kind):
+        """Suggestions may come from any cluster, nodes only from the connection's site."""
+        return Device.objects.filter(site=self.conn.site) if kind == 'node' else VirtualMachine.objects.all()
+
     def narrow(self, kind):
         cluster = self.existing_cluster()
         return lambda obj: cluster is not None and obj.cluster_id == cluster.pk
@@ -519,7 +539,8 @@ class Sync:
 
     # == phase 2: write the fetched data to NetBox ===============================================
     def write(self, links):
-        """Apply the stored data of the given links (nodes first). Ignored, ambiguous and stale ones are skipped."""
+        """Apply the stored data of the given links (nodes first). Ignored, ambiguous, suggested and stale ones are
+        skipped: a suggestion must be accepted or rejected first, otherwise a duplicate would be created."""
         order = {'node': 0}
         token = _USER.set(self.user)
         try:
@@ -529,7 +550,7 @@ class Sync:
 
     def _write(self, links):
         for link in links:
-            if link.ignored or link.kind == 'cluster' or link.state in ('ambiguous', 'stale') or not link.data:
+            if link.ignored or link.kind == 'cluster' or link.state in ('ambiguous', 'suggested', 'stale') or not link.data:
                 self.counts['skipped'] += 1
                 continue
             try:
@@ -766,5 +787,14 @@ def assign(link, target, logger):
     if other is not None:
         raise ValidationError(_('%(obj)s is already linked to %(other)s.') % {'obj': target, 'other': other})
     setattr(link, field, target)
+    link.suggested_pk = None
+    link.save()
+    return Sync(link.connection, logger).evaluate(link)
+
+
+def reject_suggestion(link, logger):
+    """Do not suggest this object again; the Proxmox object is then treated as new."""
+    link.rejected_pks = [*link.rejected_pks, link.suggested_pk]
+    link.suggested_pk = None
     link.save()
     return Sync(link.connection, logger).evaluate(link)

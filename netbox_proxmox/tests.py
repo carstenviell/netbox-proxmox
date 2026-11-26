@@ -18,7 +18,8 @@ from .client import ProxmoxClient, ProxmoxError
 from .custom_fields import CF_VMID, ensure_custom_fields
 from .jobs import changelog_context
 from .models import IgnoredOrphan, ProxmoxConnection, ProxmoxObject
-from .sync import TAG_MARKER, Sync, agent_ips, assign, discover, parse_disks, parse_nics, size_mb, storage_usage
+from .sync import (TAG_MARKER, Sync, agent_ips, assign, discover, parse_disks, parse_nics, reject_suggestion, size_mb,
+                   storage_usage)
 
 LOG = logging.getLogger('netbox_proxmox.tests')
 MAC1, MAC2 = 'bc:24:11:00:00:01', 'bc:24:11:00:00:02'
@@ -195,11 +196,49 @@ class SyncTests(TestCase):
         self.assertEqual((counts['ok'], counts['pending'], counts['new'], counts['created']), (4, 0, 0, 0))
 
     def test_existing_vm_matched_by_name(self):
-        vm = VirtualMachine.objects.create(name='WEB01', site=self.site)
+        vm = VirtualMachine.objects.create(name='web01', site=self.site, memory=1)
         self.run_sync()
         self.assertEqual(VirtualMachine.objects.filter(name__iexact='web01').count(), 1)
         vm.refresh_from_db()
-        self.assertEqual((vm.name, vm.proxmox_object.proxmox_id), ('web01', '101'))
+        self.assertEqual((vm.memory, vm.proxmox_object.proxmox_id), (4096, '101'))
+
+    def test_case_only_match_is_suggested_not_linked(self):
+        vm = VirtualMachine.objects.create(name='WEB01', site=self.site)
+        counts = self.run_sync()  # writes everything new/pending: the suggestion must not become a duplicate
+        link = self.link(101)
+        self.assertEqual((counts['suggested'], link.state, link.suggested_pk, link.virtual_machine),
+                         (1, 'suggested', vm.pk, None))
+        self.assertEqual(VirtualMachine.objects.filter(name__iexact='web01').count(), 1)
+        with changelog_context(self.user):  # skipped also when selected explicitly
+            Sync(self.conn, LOG).write([link])
+        self.assertEqual(VirtualMachine.objects.filter(name__iexact='web01').count(), 1)
+        # accepted: linked, preview shows the rename, Proxmox leads after the sync
+        self.assertEqual(assign(link, vm, LOG), 'pending')
+        link.refresh_from_db()
+        self.assertIsNone(link.suggested_pk)
+        self.assertIn('WEB01 → web01', '\n'.join(link.changes))
+        with changelog_context(self.user):
+            Sync(self.conn, LOG).write([link])
+        vm.refresh_from_db()
+        self.assertEqual(vm.name, 'web01')
+
+    def test_other_cluster_is_suggested_and_reject_is_remembered(self):
+        other = Cluster.objects.create(name='vmware', type=ClusterType.objects.create(name='VMware', slug='vmware'))
+        vm = VirtualMachine.objects.create(name='web01', cluster=other)
+        self.fetch()
+        link = self.link(101)
+        self.assertEqual((link.state, link.suggested_pk, link.virtual_machine), ('suggested', vm.pk, None))
+        self.assertEqual(reject_suggestion(link, LOG), 'new')
+        self.fetch()
+        link = self.link(101)
+        self.assertEqual((link.state, link.suggested_pk, link.rejected_pks), ('new', None, [vm.pk]))
+
+    def test_no_suggestion_when_several_match(self):
+        t1, t2 = Tenant.objects.create(name='A', slug='a'), Tenant.objects.create(name='B', slug='b')
+        VirtualMachine.objects.create(name='WEB01', site=self.site, tenant=t1)
+        VirtualMachine.objects.create(name='Web01', site=self.site, tenant=t2)
+        self.fetch()
+        self.assertEqual((self.link(101).state, self.link(101).suggested_pk), ('new', None))
 
     def test_ambiguous_name_is_not_touched(self):
         t1, t2 = Tenant.objects.create(name='A', slug='a'), Tenant.objects.create(name='B', slug='b')
@@ -271,7 +310,9 @@ class SyncTests(TestCase):
         foreign.refresh_from_db()
         self.assertEqual((foreign.cluster, foreign.status), (other, 'active'))
         self.assertFalse(hasattr(foreign, 'proxmox_object'))
-        self.assertEqual(VirtualMachine.objects.filter(name='web01').count(), 2)
+        # since 0.3.0 only a suggestion (no duplicate either); the user decides
+        self.assertEqual(VirtualMachine.objects.filter(name='web01').count(), 1)
+        self.assertEqual(self.link(101).state, 'suggested')
 
     def test_existing_netbox_tag_is_not_attached(self):  # LOW-01
         Tag.objects.create(name='prod', slug='prod')
@@ -315,13 +356,13 @@ class SyncTests(TestCase):
         self.assertEqual(self.link(200).state, 'ok')
 
     def test_name_match_is_linked_but_not_changed(self):
-        vm = VirtualMachine.objects.create(name='WEB01', site=self.site, memory=1)
+        vm = VirtualMachine.objects.create(name='web01', site=self.site, memory=1)
         before = ObjectChange.objects.count()
         self.fetch()
         link = self.link(101)
         self.assertEqual((link.virtual_machine, link.state), (vm, 'pending'))
         vm.refresh_from_db()
-        self.assertEqual((vm.name, vm.memory, ObjectChange.objects.count()), ('WEB01', 1, before))
+        self.assertEqual((vm.memory, ObjectChange.objects.count()), (1, before))
 
     def test_sync_selected_only(self):
         self.fetch()
@@ -570,12 +611,35 @@ class ActionViewTests(TestCase):
         self.client.post(f'/plugins/proxmox/sync/{pk}/assign/', {'target': allowed.pk})
         self.assertEqual(ProxmoxObject.objects.get(pk=pk).virtual_machine, allowed)
 
+    def test_accept_and_reject_suggestion(self):
+        web = VirtualMachine.objects.create(name='WEB01', site=SyncTests.site)
+        ct = VirtualMachine.objects.create(name='CT01', site=SyncTests.site)
+        discover(self.conn, FakeClient(copy.deepcopy(API)), LOG)
+        pk_web, pk_ct = ProxmoxObject.objects.get(proxmox_id='101').pk, ProxmoxObject.objects.get(proxmox_id='200').pk
+        grant(self.user, VirtualMachine, ['view'])
+        page = self.client.get('/plugins/proxmox/sync/')
+        self.assertContains(page, f'/sync/{pk_web}/accept/')
+        self.assertContains(page, web.get_absolute_url())
+        # accepting needs change permission on the suggested VM
+        self.assertEqual(self.client.post(f'/plugins/proxmox/sync/{pk_web}/accept/').status_code, 404)
+        self.assertIsNone(ProxmoxObject.objects.get(pk=pk_web).virtual_machine)
+        grant(self.user, VirtualMachine, ['change'])
+        self.assertContains(self.client.get(f'/plugins/proxmox/sync/{pk_web}/accept/'), 'WEB01')
+        self.client.post(f'/plugins/proxmox/sync/{pk_web}/accept/')
+        link = ProxmoxObject.objects.get(pk=pk_web)
+        self.assertEqual((link.virtual_machine, link.state), (web, 'pending'))
+        self.client.post(f'/plugins/proxmox/sync/{pk_ct}/reject/')
+        link = ProxmoxObject.objects.get(pk=pk_ct)
+        self.assertEqual((link.state, link.suggested_pk, link.rejected_pks), ('new', None, [ct.pk]))
+        self.assertEqual(self.client.post(f'/plugins/proxmox/sync/{pk_ct}/reject/').status_code, 404)
+
     def test_actions_require_permission(self):
         nobody = User.objects.create_user(username='nobody')
         self.client.force_login(nobody)
         pk = ProxmoxObject.objects.get(proxmox_id='101').pk
         for url in ('/plugins/proxmox/sync/fetch/', '/plugins/proxmox/sync/bulk-sync/',
-                    '/plugins/proxmox/sync/bulk-ignore/', f'/plugins/proxmox/sync/{pk}/ignore/'):
+                    '/plugins/proxmox/sync/bulk-ignore/', f'/plugins/proxmox/sync/{pk}/ignore/',
+                    f'/plugins/proxmox/sync/{pk}/accept/', f'/plugins/proxmox/sync/{pk}/reject/'):
             with self.subTest(url=url):
                 self.assertEqual(self.client.post(url, {'pk': [pk]}).status_code, 403)
 

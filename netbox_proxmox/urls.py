@@ -19,6 +19,8 @@ urlpatterns = (
     path('sync/bulk-unignore/', views.BulkIgnoreView.as_view(ignore=False), name='bulk_unignore'),
     path('sync/<int:pk>/assign/', views.AssignView.as_view(), name='assign'),
     path('sync/<int:pk>/ignore/', views.ToggleIgnoreView.as_view(), name='toggle_ignore'),
+    path('sync/<int:pk>/accept/', views.SuggestionView.as_view(accept=True), name='accept_suggestion'),
+    path('sync/<int:pk>/reject/', views.SuggestionView.as_view(accept=False), name='reject_suggestion'),
 
     # orphans: NetBox objects without Proxmox counterpart
     path('orphans/', views.OrphanListView.as_view(), {'kind': 'vms'}, name='orphans'),

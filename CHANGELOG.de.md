@@ -6,6 +6,20 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 
+## [0.3.0] – 2026-11-26
+### Neu
+- **Namensvorschläge:** Hat eine Proxmox-VM, ein Container oder ein Node keinen exakten Namenstreffer, aber genau ein
+  nicht verknüpftes NetBox-Objekt mit gleichem Namen in anderer Groß-/Kleinschreibung oder gleichnamig in einem
+  anderen Cluster, zeigt die Sync-Übersicht es als *Vorschlag* mit den Buttons *Übernehmen* und *Ablehnen*.
+  Übernehmen verknüpft das Objekt (Name und Cluster aus Proxmox erscheinen als ausstehende Änderungen); Ablehnen wird
+  gespeichert, und das Objekt gilt als neu. Migration `0005`.
+
+### Geändert
+- Die automatische Verknüpfung über den Namen verlangt jetzt exakt gleiche Namen (mit Groß-/Kleinschreibung); Namen,
+  die sich nur in der Schreibweise unterscheiden, werden zum Vorschlag statt still verknüpft.
+- *Ausgewählte synchronisieren* überspringt Vorschläge: Bisher wurde eine VM, deren Namensvetter in einem anderen
+  Cluster lag, ein zweites Mal angelegt.
+
 ## [0.2.2] – 2026-11-26
 ### Sicherheit
 - *Ausgewählte synchronisieren* prüft jetzt die Rechte des auslösenden Benutzers an **jedem** Objekt, das der Abgleich anlegt, ändert oder löscht (IP-Adressen, VM-Interfaces, virtuelle Disks, MAC-Adressen, Tags, Plattformen, VM-Typen, Cluster-Typ, Cluster), inklusive Constraints. Vorher wurde nur das Gerät bzw. die VM selbst geprüft, sodass z. B. IPs ohne IPAM-Rechte angelegt werden konnten. Ein fehlendes Recht rollt das ganze Objekt zurück (*Fehler* mit Grund). Der tägliche Lauf ist unverändert.

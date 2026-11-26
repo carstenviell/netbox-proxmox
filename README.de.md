@@ -33,12 +33,19 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
     passendes VLAN existiert).
   - IP-Adressen aus dem QEMU Guest Agent bzw. der LXC-Laufzeit (gestoppte Container: statische IPs aus der
     Konfiguration).
-- **Zuordnung:** gespeicherte Verknüpfung (VMID) → eindeutiger Name → neu. Ein eindeutiger Namenstreffer wird beim
-  Abruf direkt verknüpft (das NetBox-Objekt selbst ändert sich erst beim Synchronisieren), vorhandene Objekte werden
-  also nie doppelt angelegt. Der Namensabgleich berücksichtigt nur Objekte ohne
-  Cluster oder im eigenen Proxmox-Cluster (Nodes zusätzlich nur am Standort der Verbindung). Eine gleichnamige VM in
-  einem anderen Cluster (z. B. VMware) wird also nie übernommen. Bei mehrdeutigem Namen bleibt das Objekt
-  unangetastet und wird gemeldet.
+- **Zuordnung:** gespeicherte Verknüpfung (VMID) → eindeutiger, exakt gleicher Name → Vorschlag → neu. Ein
+  eindeutiger Treffer mit exakt gleichem Namen wird beim Abruf direkt verknüpft (das NetBox-Objekt selbst ändert sich
+  erst beim Synchronisieren). Der automatische Namensabgleich berücksichtigt nur Objekte ohne Cluster oder im eigenen
+  Proxmox-Cluster (Nodes zusätzlich nur am Standort der Verbindung). Eine gleichnamige VM in einem anderen Cluster
+  (z. B. VMware) wird also nie automatisch übernommen. Bei mehrdeutigem Namen bleibt das Objekt unangetastet und wird
+  gemeldet.
+- **Vorschläge:** Gibt es genau ein nicht verknüpftes NetBox-Objekt, dessen Name sich nur in der Groß-/Kleinschreibung
+  unterscheidet oder das gleichnamig in einem anderen Cluster liegt, erscheint es als *Vorschlag*, statt dass eine
+  Dublette entsteht. *Übernehmen* verknüpft es (der Abgleich übernimmt danach Name und Cluster aus Proxmox, vorher als
+  ausstehende Änderungen sichtbar), *Ablehnen* merkt sich die Entscheidung, und das Objekt gilt als neu. Bis zur
+  Entscheidung überspringt *Ausgewählte synchronisieren* Vorschläge. NetBox erlaubt in einem Cluster keine zwei VMs,
+  deren Namen sich nur in der Schreibweise unterscheiden: Wird ein solcher Vorschlag abgelehnt, steht das Objekt auf
+  *Fehler*, bis eines der beiden umbenannt ist.
 - **Die Proxmox-VMID wird gespeichert**, und zwar in der Verknüpfungstabelle des Plugins. Der Schlüssel ist
   Verbindung + VMID, weil VMIDs nur pro Cluster eindeutig sind. Zusätzlich steht sie im schreibgeschützten Custom
   Field `proxmox_vmid` an VMs. Die Verknüpfung übersteht Umbenennungen und Migrationen.
@@ -163,7 +170,8 @@ passen (meist Hostname oder IP des Nodes). Solange die Prüfung aus ist, zeigt d
    Hintergrund (Log unter *Jobs*). In NetBox ändert sich nichts.
 2. Liste prüfen. Zustände: *Neu* (kein NetBox-Objekt), *Änderungen ausstehend* (verknüpft, die Spalte zeigt, was
    sich ändern würde), *Abgeglichen*, *Mehrdeutig* (mehrere NetBox-Objekte mit diesem Namen, per *Zuordnen*
-   auflösen), *Fehler* (die Meldung nennt den Grund, z. B. fehlendes Recht oder Validierungsfehler),
+   auflösen), *Vorschlag* (NetBox-Objekt mit gleichem Namen in anderer Schreibweise oder in einem anderen Cluster,
+   *Übernehmen* oder *Ablehnen*), *Fehler* (die Meldung nennt den Grund, z. B. fehlendes Recht oder Validierungsfehler),
    *In Proxmox entfernt*.
 3. Objekte anhaken und *Ausgewählte synchronisieren*. Nodes zusammen mit (oder vor) ihren VMs synchronisieren,
    damit die VMs ihren Host bekommen.

@@ -35,7 +35,7 @@ from .jobs import ProxmoxSyncJob
 from .models import IgnoredOrphan, ProxmoxConnection, ProxmoxObject
 from .object_actions import (BulkDecommissionOrphans, BulkIgnoreOrphans, BulkIgnoreSelected, BulkSyncSelected,
                              BulkUnignoreSelected)
-from .sync import assign
+from .sync import assign, reject_suggestion
 
 CHANGE = 'netbox_proxmox.change_proxmoxobject'
 LOG = logging.getLogger('netbox_proxmox')
@@ -245,6 +245,50 @@ class ToggleIgnoreView(LinkMixin, View):
     def post(self, request, pk):
         link = self.link(request, pk)
         ProxmoxObject.objects.filter(pk=link.pk).update(ignored=not link.ignored)
+        return redirect(_return_url(request, 'plugins:netbox_proxmox:proxmoxobject_list'))
+
+
+class SuggestionView(LinkMixin, View):
+    """Accept (link) or reject the suggested NetBox object of a Proxmox object."""
+    template_name = 'netbox_proxmox/confirm.html'
+    accept = True
+
+    def link(self, request, pk):
+        link = super().link(request, pk)
+        if link.state != 'suggested' or not link.suggested_pk:
+            raise Http404
+        return link
+
+    def suggested(self, request, link):
+        # accepting needs change permission on the suggested object (permission constraints included)
+        return get_object_or_404(link.target_model.objects.restrict(request.user, 'change')
+                                 .filter(proxmox_object__isnull=True), pk=link.suggested_pk)
+
+    def get(self, request, pk):
+        link = self.link(request, pk)
+        obj = self.suggested(request, link)
+        question = _('Link %(name)s to %(obj)s? The pending changes (e.g. name and cluster from Proxmox) are shown '
+                     'in the sync overview and written when you sync the object.') if self.accept else \
+            _('Reject %(obj)s as suggestion for %(name)s? It will not be suggested again; syncing %(name)s then '
+              'creates a new NetBox object.')
+        return render(request, self.template_name, {
+            'question': question % {'name': link.name, 'obj': obj},
+            'return_url': _return_url(request, 'plugins:netbox_proxmox:proxmoxobject_list')})
+
+    def post(self, request, pk):
+        link = self.link(request, pk)
+        obj = self.suggested(request, link)
+        if self.accept:
+            try:
+                assign(link, obj, LOG)
+            except ValidationError as exc:
+                messages.error(request, '; '.join(exc.messages))
+            else:
+                messages.success(request, _('%(name)s linked to %(obj)s. Review the pending changes and sync.') % {
+                    'name': link.name, 'obj': obj})
+        else:
+            reject_suggestion(link, LOG)
+            messages.success(request, _('Suggestion %(obj)s rejected.') % {'obj': obj})
         return redirect(_return_url(request, 'plugins:netbox_proxmox:proxmoxobject_list'))
 
 

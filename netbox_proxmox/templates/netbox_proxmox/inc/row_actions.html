@@ -1,6 +1,10 @@
 {% load i18n %}
 {% if perms.netbox_proxmox.change_proxmoxobject %}
   <div class="d-flex gap-1 justify-content-end">
+    {% if record.state == 'suggested' %}
+      <a href="{% url 'plugins:netbox_proxmox:accept_suggestion' pk=record.pk %}?return_url={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-success">{% trans "Accept" %}</a>
+      <a href="{% url 'plugins:netbox_proxmox:reject_suggestion' pk=record.pk %}?return_url={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-outline-danger">{% trans "Reject" %}</a>
+    {% endif %}
     {% if not record.target and record.state != 'stale' %}
       <a href="{% url 'plugins:netbox_proxmox:assign' pk=record.pk %}?return_url={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-primary">{% trans "Assign" %}</a>
     {% endif %}

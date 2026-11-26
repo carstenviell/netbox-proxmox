@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: netbox-proxmox\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-26 05:12+0000\n"
+"POT-Creation-Date: 2026-11-26 08:11+0000\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -73,7 +73,7 @@ msgstr "Sonstiges"
 msgid "Search"
 msgstr "Suche"
 
-#: forms.py:45 tables.py:44 templates/netbox_proxmox/orphan_list.html:11
+#: forms.py:45 tables.py:45 templates/netbox_proxmox/orphan_list.html:11
 #: templates/netbox_proxmox/sync_list.html:8
 msgid "Ignored"
 msgstr "Ignoriert"
@@ -98,7 +98,7 @@ msgstr "Zustand"
 msgid "NetBox object"
 msgstr "NetBox-Objekt"
 
-#: forms.py:71 models.py:127
+#: forms.py:71 models.py:132
 msgid "Proxmox object"
 msgstr "Proxmox-Objekt"
 
@@ -251,111 +251,123 @@ msgstr "Abgeglichen"
 msgid "Ambiguous"
 msgstr "Mehrdeutig"
 
-#: models.py:91
+#: models.py:91 tables.py:43
+msgid "Suggestion"
+msgstr "Vorschlag"
+
+#: models.py:92
 msgid "Error"
 msgstr "Fehler"
 
-#: models.py:92 tables.py:106
+#: models.py:93 tables.py:118
 msgid "Gone from Proxmox"
 msgstr "In Proxmox entfernt"
 
-#: models.py:96
+#: models.py:97
 msgid "connection"
 msgstr "Verbindung"
 
-#: models.py:97
+#: models.py:98
 msgid "type"
 msgstr "Typ"
 
-#: models.py:98
+#: models.py:99
 msgid "Proxmox ID"
 msgstr "Proxmox-ID"
 
-#: models.py:99
+#: models.py:100
 msgid "VMID, node name or cluster name"
 msgstr "VMID, Node-Name oder Cluster-Name"
 
-#: models.py:100
+#: models.py:101
 msgid "name in Proxmox"
 msgstr "Name in Proxmox"
 
-#: models.py:101
+#: models.py:102
 msgid "node"
 msgstr "Node"
 
-#: models.py:106
+#: models.py:107
 msgid "state"
 msgstr "Zustand"
 
-#: models.py:107
+#: models.py:108
 msgid "message"
 msgstr "Meldung"
 
-#: models.py:108
+#: models.py:109
 msgid "last seen"
 msgstr "zuletzt gesehen"
 
-#: models.py:109
+#: models.py:110
 msgid "ignored"
 msgstr "ignoriert"
 
-#: models.py:110
+#: models.py:111
 msgid "Never written to NetBox, also not by the daily sync"
 msgstr "Wird nie nach NetBox geschrieben, auch nicht vom täglichen Abgleich"
 
-#: models.py:111
+#: models.py:112
 msgid "fetched data"
 msgstr "abgerufene Daten"
 
-#: models.py:112
+#: models.py:113
 msgid "pending changes"
 msgstr "ausstehende Änderungen"
 
 #: models.py:115
+msgid "suggested object"
+msgstr "vorgeschlagenes Objekt"
+
+#: models.py:117
+msgid "rejected suggestions"
+msgstr "abgelehnte Vorschläge"
+
+#: models.py:120
 msgid "CPU usage (%)"
 msgstr "CPU-Auslastung (%)"
 
-#: models.py:116
+#: models.py:121
 msgid "CPUs"
 msgstr "CPUs"
 
-#: models.py:117
+#: models.py:122
 msgid "memory used"
 msgstr "RAM belegt"
 
-#: models.py:118
+#: models.py:123
 msgid "memory total"
 msgstr "RAM gesamt"
 
-#: models.py:119
+#: models.py:124
 msgid "disk used"
 msgstr "Speicher belegt"
 
-#: models.py:120
+#: models.py:125
 msgid "disk total"
 msgstr "Speicher gesamt"
 
-#: models.py:121
+#: models.py:126
 msgid "uptime (s)"
 msgstr "Laufzeit (s)"
 
-#: models.py:128 views.py:91
+#: models.py:133 views.py:91
 msgid "Proxmox objects"
 msgstr "Proxmox-Objekte"
 
-#: models.py:148
+#: models.py:159
 msgid "note"
 msgstr "Notiz"
 
-#: models.py:149
+#: models.py:160
 msgid "ignored since"
 msgstr "ignoriert seit"
 
-#: models.py:154
+#: models.py:165
 msgid "ignored Proxmox orphan"
 msgstr "ignorierter Proxmox-Orphan"
 
-#: models.py:155
+#: models.py:166
 msgid "ignored Proxmox orphans"
 msgstr "ignorierte Proxmox-Orphans"
 
@@ -429,36 +441,44 @@ msgid "%(n)d NetBox objects named %(name)s – assign manually or rename."
 msgstr ""
 "%(n)d NetBox-Objekte heißen %(name)s – manuell zuordnen oder umbenennen."
 
-#: sync.py:440
+#: sync.py:449
 #, python-format
 msgid "%(name)s linked to the existing NetBox object by name."
 msgstr "%(name)s wurde per Name mit dem vorhandenen NetBox-Objekt verknüpft."
 
-#: sync.py:516
+#: sync.py:458
+msgid ""
+"A NetBox object with this name apart from case or in another cluster exists "
+"– accept or reject the suggestion."
+msgstr ""
+"Es gibt ein NetBox-Objekt mit diesem Namen in anderer Schreibweise oder in "
+"einem anderen Cluster – Vorschlag übernehmen oder ablehnen."
+
+#: sync.py:536
 msgid "No longer present in Proxmox"
 msgstr "In Proxmox nicht mehr vorhanden"
 
-#: sync.py:571
+#: sync.py:592
 #, python-format
 msgid "Creating cluster %(name)s"
 msgstr "Lege Cluster %(name)s an"
 
-#: sync.py:606
+#: sync.py:627
 #, python-format
 msgid "Creating device %(name)s"
 msgstr "Lege Gerät %(name)s an"
 
-#: sync.py:650
+#: sync.py:671
 #, python-format
 msgid "Creating virtual machine %(name)s"
 msgstr "Lege virtuelle Maschine %(name)s an"
 
-#: sync.py:655
+#: sync.py:676
 #, python-format
 msgid "%(name)s moved from %(old)s to %(new)s"
 msgstr "%(name)s von %(old)s nach %(new)s verschoben"
 
-#: sync.py:679
+#: sync.py:700
 #, python-format
 msgid ""
 "%(name)s: node %(node)s is not linked to a device in cluster %(cluster)s – "
@@ -467,55 +487,59 @@ msgstr ""
 "%(name)s: Node %(node)s ist mit keinem Gerät im Cluster %(cluster)s "
 "verknüpft – Host-Zuordnung unverändert."
 
-#: sync.py:731
+#: sync.py:752
 #, python-format
 msgid "%(vm)s %(iface)s: %(n)d IP addresses reported, only %(limit)d taken."
 msgstr ""
 "%(vm)s %(iface)s: %(n)d IP-Adressen gemeldet, nur %(limit)d übernommen."
 
-#: sync.py:763
+#: sync.py:784
 #, python-format
 msgid "A %(kind)s can only be assigned to a %(model)s."
 msgstr ""
 "Ein Objekt vom Typ %(kind)s kann nur einem Objekt vom Typ %(model)s "
 "zugeordnet werden."
 
-#: sync.py:767
+#: sync.py:788
 #, python-format
 msgid "%(obj)s is already linked to %(other)s."
 msgstr "%(obj)s ist bereits mit %(other)s verknüpft."
 
-#: tables.py:43
+#: tables.py:44
 msgid "Pending changes"
 msgstr "Ausstehende Änderungen"
 
-#: tables.py:47
+#: tables.py:48
 msgid "Memory"
 msgstr "RAM"
 
-#: tables.py:48
+#: tables.py:49
 msgid "Disk"
 msgstr "Speicher"
 
-#: tables.py:68
+#: tables.py:69 tables.py:78
 msgid "(no access)"
 msgstr "(kein Zugriff)"
 
 #: tables.py:81
+msgid "no cluster"
+msgstr "kein Cluster"
+
+#: tables.py:93
 #, python-format
 msgid "%(n)d change(s)"
 msgstr "%(n)d Änderung(en)"
 
-#: tables.py:88
+#: tables.py:100
 #, python-format
 msgid "+ %(n)d more"
 msgstr "+ %(n)d weitere"
 
-#: tables.py:98
+#: tables.py:110
 msgid "Proxmox"
 msgstr "Proxmox"
 
-#: tables.py:107
+#: tables.py:119
 msgid "Not linked"
 msgstr "Nicht verknüpft"
 
@@ -544,7 +568,7 @@ msgstr "Abbrechen"
 
 #: templates/netbox_proxmox/assign.html:14
 #: templates/netbox_proxmox/inc/orphan_row_actions.html:5
-#: templates/netbox_proxmox/inc/row_actions.html:5
+#: templates/netbox_proxmox/inc/row_actions.html:9
 #: templates/netbox_proxmox/orphan_assign.html:13
 msgid "Assign"
 msgstr "Zuordnen"
@@ -555,14 +579,22 @@ msgid "Confirm"
 msgstr "Bestätigen"
 
 #: templates/netbox_proxmox/inc/orphan_row_actions.html:8
-#: templates/netbox_proxmox/inc/row_actions.html:7
+#: templates/netbox_proxmox/inc/row_actions.html:11
 msgid "Unignore"
 msgstr "Nicht mehr ignorieren"
 
 #: templates/netbox_proxmox/inc/orphan_row_actions.html:8
-#: templates/netbox_proxmox/inc/row_actions.html:7
+#: templates/netbox_proxmox/inc/row_actions.html:11
 msgid "Ignore"
 msgstr "Ignorieren"
+
+#: templates/netbox_proxmox/inc/row_actions.html:5
+msgid "Accept"
+msgstr "Übernehmen"
+
+#: templates/netbox_proxmox/inc/row_actions.html:6
+msgid "Reject"
+msgstr "Ablehnen"
 
 #: templates/netbox_proxmox/orphan_assign.html:3
 #, python-format
@@ -699,7 +731,7 @@ msgstr "Keine Objekte ausgewählt."
 msgid "Sync of %(count)d object(s) enqueued."
 msgstr "Abgleich von %(count)d Objekt(en) eingereiht."
 
-#: views.py:198 views.py:369
+#: views.py:198 views.py:413
 #, python-format
 msgid "%(count)d object(s) ignored."
 msgstr "%(count)d Objekt(e) ignoriert."
@@ -709,7 +741,7 @@ msgstr "%(count)d Objekt(e) ignoriert."
 msgid "%(count)d object(s) no longer ignored."
 msgstr "%(count)d Objekt(e) werden nicht mehr ignoriert."
 
-#: views.py:229
+#: views.py:229 views.py:287
 #, python-format
 msgid "%(name)s linked to %(obj)s. Review the pending changes and sync."
 msgstr ""
@@ -730,24 +762,49 @@ msgstr ""
 "%(name)s ignorieren? Es wird nicht nach NetBox geschrieben, auch nicht vom "
 "täglichen Abgleich."
 
-#: views.py:314
+#: views.py:270
+#, python-format
+msgid ""
+"Link %(name)s to %(obj)s? The pending changes (e.g. name and cluster from "
+"Proxmox) are shown in the sync overview and written when you sync the object."
+msgstr ""
+"%(name)s mit %(obj)s verknüpfen? Die ausstehenden Änderungen (z. B. Name und "
+"Cluster aus Proxmox) erscheinen in der Sync-Übersicht und werden "
+"geschrieben, wenn du das Objekt synchronisierst."
+
+#: views.py:272
+#, python-format
+msgid ""
+"Reject %(obj)s as suggestion for %(name)s? It will not be suggested again; "
+"syncing %(name)s then creates a new NetBox object."
+msgstr ""
+"%(obj)s als Vorschlag für %(name)s ablehnen? Es wird nicht erneut "
+"vorgeschlagen; beim Synchronisieren von %(name)s entsteht dann ein neues "
+"NetBox-Objekt."
+
+#: views.py:291
+#, python-format
+msgid "Suggestion %(obj)s rejected."
+msgstr "Vorschlag %(obj)s abgelehnt."
+
+#: views.py:358
 #, python-format
 msgid "%(obj)s linked to %(name)s. Review the pending changes and sync."
 msgstr ""
 "%(obj)s mit %(name)s verknüpft. Prüfe die ausstehenden Änderungen und "
 "synchronisiere."
 
-#: views.py:327
+#: views.py:371
 #, python-format
 msgid "Show %(obj)s as orphan again?"
 msgstr "%(obj)s wieder als Orphan anzeigen?"
 
-#: views.py:327
+#: views.py:371
 #, python-format
 msgid "Ignore %(obj)s on the orphans page?"
 msgstr "%(obj)s auf der Orphans-Seite ignorieren?"
 
-#: views.py:370
+#: views.py:414
 #, python-format
 msgid "%(count)d object(s) set to decommissioning."
 msgstr "%(count)d Objekt(e) auf „Außer Betrieb“ gesetzt."

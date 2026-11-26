@@ -88,6 +88,7 @@ class ProxmoxObject(models.Model):
         ('pending', _('Changes pending')),
         ('ok', _('In sync')),
         ('ambiguous', _('Ambiguous')),
+        ('suggested', _('Suggestion')),
         ('error', _('Error')),
         ('stale', _('Gone from Proxmox')),
     ]
@@ -110,6 +111,10 @@ class ProxmoxObject(models.Model):
                                   help_text=_('Never written to NetBox, also not by the daily sync'))
     data = models.JSONField(verbose_name=_('fetched data'), default=dict, blank=True, editable=False)
     changes = models.JSONField(verbose_name=_('pending changes'), default=list, blank=True, editable=False)
+    # name matches only apart from case or outside this cluster: shown as a suggestion, never linked automatically
+    suggested_pk = models.PositiveIntegerField(verbose_name=_('suggested object'), null=True, blank=True,
+                                               editable=False)
+    rejected_pks = models.JSONField(verbose_name=_('rejected suggestions'), default=list, blank=True, editable=False)
 
     # Usage snapshot from the last sync (bytes / percent / seconds)
     cpu_usage = models.FloatField(verbose_name=_('CPU usage (%)'), null=True, blank=True)
@@ -137,6 +142,12 @@ class ProxmoxObject(models.Model):
     @property
     def target(self):
         return self.device or self.virtual_machine
+
+    @property
+    def target_model(self):
+        from dcim.models import Device
+        from virtualization.models import VirtualMachine
+        return Device if self.kind == 'node' else VirtualMachine
 
 
 class IgnoredOrphan(models.Model):
