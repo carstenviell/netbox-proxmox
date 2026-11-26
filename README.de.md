@@ -69,21 +69,21 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
 ## Installation
 
 Das Plugin ist nicht auf PyPI veröffentlicht. Installiert wird es aus dem GitHub-Release-Archiv. Das funktioniert
-ohne `git`, auch im netbox-docker-Image. `v0.2.1` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
+ohne `git`, auch im netbox-docker-Image. `v0.2.2` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
 
 **NetBox aus dem Quellcode (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.2.tar.gz
 
 # Plugin bei NetBox-Upgrades behalten (upgrade.sh installiert local_requirements.txt neu)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.2.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** in `plugin_requirements.txt` eintragen
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.1.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.2.2.tar.gz
 ```
 
 und in `Dockerfile-Plugins` (daraus `netbox`, `netbox-worker` und `netbox-housekeeping` über `docker-compose.override.yml` bauen):
@@ -180,9 +180,10 @@ Der System-Job läuft alle `sync_interval_min` Minuten (siehe *Täglicher Lauf* 
 |---|---|
 | Verbindungen ansehen | `netbox_proxmox.view_proxmoxconnection` |
 | Verbindungen anlegen/ändern/löschen, Verbindung testen | **Superuser** (die Verbindung bestimmt, wohin das Token geht) |
-| Sync-Übersicht und Karten *Proxmox* ansehen | `netbox_proxmox.view_proxmoxobject` |
-| Abrufen, Ausgewählte synchronisieren, Zuordnen, Ignorieren | `netbox_proxmox.change_proxmoxobject`, dazu `add`/`change` am NetBox-Gerät bzw. an der VM (Constraints greifen) |
-| Orphans ignorieren | `netbox_proxmox.change_ignoredorphan` |
+| Sync-Übersicht und Karten *Proxmox* ansehen | `netbox_proxmox.view_proxmoxobject` (verknüpfte NetBox-Objekte nur mit `view` daran; die Liste der ausstehenden Änderungen nur mit `change_proxmoxobject`) |
+| Abrufen, Zuordnen, Ignorieren | `netbox_proxmox.change_proxmoxobject` |
+| Ausgewählte synchronisieren | `netbox_proxmox.change_proxmoxobject`, dazu `add`/`change`/`delete` an **jedem Objekt, das der Abgleich berührt**: Gerät/VM, VM-Interfaces, virtuelle Disks, IP-Adressen, MAC-Adressen und, falls neu, Tags, Plattformen, Cluster-Typ und Cluster. Constraints greifen (z. B. IPs nur in bestimmten VRFs). Ein fehlendes Recht rollt das ganze Objekt zurück und zeigt *Fehler* mit Grund. Der tägliche Lauf ist nicht betroffen. |
+| Orphans ignorieren | `netbox_proxmox.add_ignoredorphan` und `delete_ignoredorphan` |
 | Orphans außer Betrieb setzen | `change` am Gerät bzw. an der VM |
 
 ## Sprache

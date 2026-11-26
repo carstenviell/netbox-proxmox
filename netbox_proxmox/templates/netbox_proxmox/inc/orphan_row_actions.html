@@ -4,7 +4,7 @@
     {% if perms.netbox_proxmox.change_proxmoxobject %}
       <a href="{% if kind == 'device' %}{% url 'plugins:netbox_proxmox:orphan_assign' kind='devices' pk=record.pk %}{% else %}{% url 'plugins:netbox_proxmox:orphan_assign' kind='vms' pk=record.pk %}{% endif %}" class="btn btn-sm btn-primary">{% trans "Assign" %}</a>
     {% endif %}
-    {% if perms.netbox_proxmox.change_ignoredorphan %}
+    {% if perms.netbox_proxmox.add_ignoredorphan and perms.netbox_proxmox.delete_ignoredorphan %}
       <a href="{% if kind == 'device' %}{% url 'plugins:netbox_proxmox:orphan_toggle_ignore' kind='devices' pk=record.pk %}{% else %}{% url 'plugins:netbox_proxmox:orphan_toggle_ignore' kind='vms' pk=record.pk %}{% endif %}" class="btn btn-sm btn-outline-secondary">{% if record.proxmox_ignored %}{% trans "Unignore" %}{% else %}{% trans "Ignore" %}{% endif %}</a>
     {% endif %}
   </div>

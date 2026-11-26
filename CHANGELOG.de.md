@@ -6,6 +6,16 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 
+## [0.2.2] – 2026-11-26
+### Sicherheit
+- *Ausgewählte synchronisieren* prüft jetzt die Rechte des auslösenden Benutzers an **jedem** Objekt, das der Abgleich anlegt, ändert oder löscht (IP-Adressen, VM-Interfaces, virtuelle Disks, MAC-Adressen, Tags, Plattformen, VM-Typen, Cluster-Typ, Cluster), inklusive Constraints. Vorher wurde nur das Gerät bzw. die VM selbst geprüft, sodass z. B. IPs ohne IPAM-Rechte angelegt werden konnten. Ein fehlendes Recht rollt das ganze Objekt zurück (*Fehler* mit Grund). Der tägliche Lauf ist unverändert.
+- Der Abruf speichert nur noch die Schlüssel der Gast-Konfiguration, die der Abgleich nutzt; Freitext-Notizen (`description`), Hostname, DNS-Einstellungen usw. werden nicht mehr gespeichert. Migration `0004` entfernt sie aus vorhandenen Daten.
+- Sync-Übersicht: Verknüpfte NetBox-Objekte sehen nur Benutzer, die sie ansehen dürfen; die Liste der ausstehenden Änderungen nur mit `change_proxmoxobject`.
+- Orphans ignorieren erfordert `add_ignoredorphan`/`delete_ignoredorphan`.
+
+### Behoben
+- Fehlerhafte Auswahlwerte führen nicht mehr zu HTTP 500; Weiterleitungsparameter werden URL-kodiert.
+
 ## [0.2.1] – 2026-11-25
 ### Behoben
 - Die Sync-Übersicht brach mit `TypeError: args or kwargs must be provided` (Server Error) ab, sobald ein Objekt ausstehende Änderungen hatte (z. B. neue Objekte nach dem ersten Abruf). Ursache: `format_html()` ohne Argumente, seit Django 6 (NetBox 4.7) ein Fehler. Regressionstest ergänzt.

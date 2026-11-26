@@ -363,6 +363,56 @@ class SyncTests(TestCase):
         self.assertFalse(VirtualMachine.objects.exists())
         self.assertEqual(self.link(101).state, 'error')
 
+    def test_sync_checks_permissions_on_related_objects(self):  # audit 2026-11-26 MEDIUM-03
+        """A user who may create VMs but not IP addresses must not get IPs (or other related objects) created."""
+        user = User.objects.create_user(username='vm-admin')
+        for model in (ProxmoxObject, VirtualMachine, Cluster):
+            grant(user, model, ['view', 'add', 'change'])
+        self.fetch()
+        with changelog_context(user):
+            Sync(self.conn, LOG, user=user).write([self.link(101)])
+        self.assertFalse(IPAddress.objects.exists())
+        self.assertFalse(VirtualMachine.objects.filter(name='web01').exists())  # whole object rolled back
+        self.assertEqual(self.link(101).state, 'error')
+        self.assertIn('not allowed', self.link(101).message)
+
+    def test_sync_with_full_permissions_works(self):  # MEDIUM-03: the check must not block legitimate users
+        from dcim.models import MACAddress, Platform
+        from virtualization.models import VirtualDisk, VirtualMachineType, VMInterface
+        user = User.objects.create_user(username='full')
+        for model in (ProxmoxObject, VirtualMachine, Cluster, ClusterType, VMInterface, VirtualDisk, IPAddress,
+                      MACAddress, Tag, Platform, VirtualMachineType):
+            grant(user, model, ['view', 'add', 'change', 'delete'])
+        self.fetch()
+        with changelog_context(user):
+            Sync(self.conn, LOG, user=user).write([self.link(101)])
+        self.assertEqual(self.link(101).state, 'ok', self.link(101).message)
+        self.assertEqual(str(VirtualMachine.objects.get(name='web01').primary_ip4.address), '10.0.0.5/24')
+
+    def test_ip_constraints_are_enforced(self):  # MEDIUM-03: IPAM constraints apply to synced IPs
+        from dcim.models import MACAddress, Platform
+        from virtualization.models import VirtualDisk, VirtualMachineType, VMInterface
+        user = User.objects.create_user(username='limited-ipam')
+        for model in (ProxmoxObject, VirtualMachine, Cluster, ClusterType, VMInterface, VirtualDisk, MACAddress, Tag,
+                      Platform, VirtualMachineType):
+            grant(user, model, ['view', 'add', 'change', 'delete'])
+        grant(user, IPAddress, ['view', 'add', 'change'], constraints={'status': 'reserved'})  # never matches
+        self.fetch()
+        with changelog_context(user):
+            Sync(self.conn, LOG, user=user).write([self.link(101)])
+        self.assertFalse(IPAddress.objects.exists())
+        self.assertEqual(self.link(101).state, 'error')
+        self.assertIn('IP address', self.link(101).message)
+
+    def test_notes_are_not_stored(self):  # LOW-04
+        cfg = self.api[('nodes', 'pve1', 'qemu', 101, 'config')]
+        cfg.update(description='root password is hunter2', hostname='web01.internal', nameserver='10.0.0.1')
+        self.fetch()
+        stored = self.link(101).data['config']
+        self.assertNotIn('description', stored)
+        self.assertNotIn('nameserver', stored)
+        self.assertEqual(set(stored), {'ostype', 'onboot', 'smbios1', 'scsi0', 'ide2', 'net0'})
+
     def test_update_requires_change_permission_with_constraints(self):
         self.run_sync()
         self.resource(101)['maxmem'] = 8 * G
@@ -471,6 +521,37 @@ class ActionViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '+ virtual machine web01')
         self.assertContains(response, '<br>')
+
+    def test_hidden_target_and_changes_for_viewers(self):  # LOW-05
+        admin = User.objects.create_user(username='adm2', is_superuser=True)
+        full_sync(self.conn, copy.deepcopy(API), admin)
+        ProxmoxObject.objects.filter(proxmox_id='101').update(state='pending', changes=['virtual machine web01: device pve1 → pve2'])
+        viewer = User.objects.create_user(username='viewer2')
+        grant(viewer, ProxmoxObject, ['view'])
+        grant(viewer, VirtualMachine, ['view'], constraints={'name': 'ct01'})  # may not see web01
+        self.client.force_login(viewer)
+        page = self.client.get('/plugins/proxmox/sync/').content.decode()
+        self.assertIn('(no access)', page)
+        self.assertIn('>ct01<', page)
+        self.assertNotIn('pve1 → pve2', page)
+        self.assertIn('1 change(s)', page)
+
+    def test_malformed_pk_is_ignored(self):  # INFO-05
+        response = self.client.post('/plugins/proxmox/sync/bulk-ignore/', {'pk': ['abc', '1 OR 1=1']})
+        self.assertEqual(response.status_code, 302)
+
+    def test_orphan_ignore_needs_add_and_delete(self):  # INFO-04
+        admin = User.objects.create_user(username='adm3', is_superuser=True)
+        full_sync(self.conn, copy.deepcopy(API), admin)
+        cluster = ProxmoxConnection.objects.get(pk=self.conn.pk).cluster
+        orphan = VirtualMachine.objects.create(name='manual', cluster=cluster)
+        user = User.objects.create_user(username='half')
+        grant(user, IgnoredOrphan, ['view', 'change'])
+        grant(user, VirtualMachine, ['view', 'change'])
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(f'/plugins/proxmox/orphans/vms/{orphan.pk}/ignore/').status_code, 403)
+        self.assertEqual(self.client.post('/plugins/proxmox/orphans/vms/bulk-ignore/', {'pk': [orphan.pk]}).status_code, 403)
+        self.assertFalse(IgnoredOrphan.objects.exists())
 
     def test_bulk_ignore_and_unignore(self):
         pk = ProxmoxObject.objects.get(proxmox_id='101').pk

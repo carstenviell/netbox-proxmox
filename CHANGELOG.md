@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.2.2] – 2026-11-26
+### Security
+- *Sync selected* now checks the permissions of the requesting user on **every** object the sync creates, changes or deletes (IP addresses, VM interfaces, virtual disks, MAC addresses, tags, platforms, VM types, cluster type, cluster), including constraints – before, only the device/VM itself was checked, so e.g. IPs could be created without IPAM permissions. A missing permission rolls back the whole object (*Error* with reason). The daily run is unchanged.
+- Fetching stores only the guest config keys the sync uses; free-text notes (`description`), hostname, DNS settings etc. are no longer stored. Migration `0004` removes them from existing data.
+- Sync overview: linked NetBox objects are only shown to users who may view them; the list of pending changes only with `change_proxmoxobject`.
+- Ignoring orphans requires `add_ignoredorphan`/`delete_ignoredorphan`.
+
+### Fixed
+- Malformed selection values no longer cause HTTP 500; redirect parameters are URL-encoded.
+
 ## [0.2.1] – 2026-11-25
 ### Fixed
 - Sync overview failed with `TypeError: args or kwargs must be provided` (Server Error) as soon as an object had pending changes (e.g. new objects after the first fetch). Cause: `format_html()` without arguments, an error since Django 6 (NetBox 4.7). Regression test added.

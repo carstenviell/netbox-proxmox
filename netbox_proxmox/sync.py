@@ -145,6 +145,16 @@ def lxc_ips(interfaces):
     return out
 
 
+CONFIG_KEYS = ('ostype', 'onboot', 'smbios1')
+
+
+def used_config(config):
+    """Only the config keys the sync uses. Notes (description), hostname, DNS etc. are not stored - free-text
+    notes often contain credentials and would otherwise end up in every NetBox database dump."""
+    return {k: v for k, v in config.items()
+            if k in CONFIG_KEYS or QEMU_DISK.match(k) or LXC_DISK.match(k) or NET_KEY.match(k)}
+
+
 def platform_name(ostype):
     if not ostype or ostype in ('other', 'unmanaged'):
         return None
@@ -203,6 +213,21 @@ def _field_label(obj, name):
         return name
 
 
+_USER = ContextVar('netbox_proxmox_user', default=None)  # set during manual writes; None = system run
+
+
+def permit(obj, action):
+    """Raise PermissionDenied unless the user of a manual sync may <action> obj (permission constraints included).
+    Covers every object the sync touches (IPs, interfaces, disks, MACs, tags, platforms, types), not only the VM."""
+    user = _USER.get()
+    if user is None:
+        return
+    if not type(obj).objects.restrict(user, action).filter(pk=obj.pk).exists():
+        text = {'add': _('You are not allowed to create %(obj)s.'), 'change': _('You are not allowed to change %(obj)s.'),
+                'delete': _('You are not allowed to delete %(obj)s.')}[action]
+        raise PermissionDenied(text % {'obj': _label(obj)})
+
+
 def error_text(exc):
     return '; '.join(getattr(exc, 'messages', None) or [str(exc)])
 
@@ -215,11 +240,13 @@ def apply(obj, **fields):
         return False
     old = {} if new else {k: getattr(obj, k) for k in fields}
     if not new:
+        permit(obj, 'change')  # constraints on the current state
         obj.snapshot()
     for k, v in fields.items():
         setattr(obj, k, v)
     obj.full_clean()
     obj.save()
+    permit(obj, 'add' if new else 'change')  # constraints on the new state
     if new:
         record(f'+ {_label(obj)}')
     else:
@@ -237,6 +264,7 @@ def get_or_create_named(model, name, **extra):
         obj = model(name=name, slug=slug, **extra)
         obj.full_clean()
         obj.save()
+        permit(obj, 'add')
     return obj
 
 
@@ -256,6 +284,7 @@ def add_tags(obj, tags, logger):
             continue
         to_add.append(tag)
     if to_add:
+        permit(obj, 'change')
         obj.snapshot()
         obj.tags.add(*to_add)
         for tag in to_add:
@@ -376,7 +405,7 @@ class Sync:
         kind, vmid, node = r['type'], r['vmid'], r.get('node')
         payload = {'resource': r, 'config': None, 'live': None}
         try:
-            payload['config'] = self.client.get('nodes', node, kind, vmid, 'config') or {}
+            payload['config'] = used_config(self.client.get('nodes', node, kind, vmid, 'config') or {})
         except ProxmoxError as exc:  # e.g. node offline: keep what NetBox has, only status/usage
             self.logger.warning(f'{kind} {vmid}: {exc}')
         live = self.live_ips(kind, node, vmid, r)
@@ -492,7 +521,14 @@ class Sync:
     def write(self, links):
         """Apply the stored data of the given links (nodes first). Ignored, ambiguous and stale ones are skipped."""
         order = {'node': 0}
-        for link in sorted(links, key=lambda x: order.get(x.kind, 1)):
+        token = _USER.set(self.user)
+        try:
+            return self._write(sorted(links, key=lambda x: order.get(x.kind, 1)))
+        finally:
+            _USER.reset(token)
+
+    def _write(self, links):
+        for link in links:
             if link.ignored or link.kind == 'cluster' or link.state in ('ambiguous', 'stale') or not link.data:
                 self.counts['skipped'] += 1
                 continue
@@ -530,8 +566,6 @@ class Sync:
         token = _RECORD.set(None)  # cluster bookkeeping is not part of one object's preview
         try:
             if cluster is None:
-                if self.user is not None and not self.user.has_perm('virtualization.add_cluster'):
-                    raise PermissionDenied(_('You are not allowed to create the cluster.'))
                 cluster = Cluster(type=get_or_create_named(ClusterType, 'Proxmox VE'), scope=self.conn.site,
                                   tenant=self.conn.tenant)
                 self.log.info(_('Creating cluster %(name)s') % {'name': self.cluster_name()})
@@ -542,14 +576,11 @@ class Sync:
             type(self.conn).objects.filter(pk=self.conn.pk).update(cluster=cluster)
         return cluster
 
-    def check_change(self, obj):
-        if self.user is not None and obj is not None and \
-                not type(obj).objects.restrict(self.user, 'change').filter(pk=obj.pk).exists():
-            raise PermissionDenied(_('You are not allowed to change %(obj)s.') % {'obj': obj})
-
-    def check_add(self, obj):
-        if self.user is not None and not type(obj).objects.restrict(self.user, 'add').filter(pk=obj.pk).exists():
-            raise PermissionDenied(_('You are not allowed to create %(obj)s.') % {'obj': obj})
+    @staticmethod
+    def check_change(obj):
+        """The user must be allowed to change the synced object itself, even if only its components change."""
+        if obj is not None:
+            permit(obj, 'change')
 
     @staticmethod
     def link_target(link, obj):
@@ -574,8 +605,6 @@ class Sync:
                             device_type=self.conn.node_device_type, tenant=self.conn.tenant)
             self.log.info(_('Creating device %(name)s') % {'name': name})
         changed = apply(device, **fields)
-        if created:
-            self.check_add(device)
         self.link_target(link, device)
         if 'network' in payload:
             changed |= self.sync_node_interfaces(device, payload['network'])
@@ -621,12 +650,11 @@ class Sync:
             self.log.info(_('Creating virtual machine %(name)s') % {'name': name})
         old_host = None if created else vm.device
         changed = apply(vm, **fields)
-        if created:
-            self.check_add(vm)
         if old_host and vm.device and old_host != vm.device and not self.dry:
             self.counts['moved'] += 1
             self.log.info(_('%(name)s moved from %(old)s to %(new)s') % {'name': name, 'old': old_host, 'new': vm.device})
         if vm.custom_field_data.get(CF_VMID) != vmid:
+            permit(vm, 'change')
             vm.snapshot()
             vm.custom_field_data[CF_VMID] = vmid
             vm.save()
@@ -658,6 +686,7 @@ class Sync:
         wanted = dict(disks)
         for disk in vm.virtualdisks.all():
             if disk.name not in wanted and (QEMU_DISK.match(disk.name) or LXC_DISK.match(disk.name)):
+                permit(disk, 'delete')
                 record(f'− {_label(disk)}')
                 disk.snapshot()
                 disk.delete()
@@ -672,6 +701,7 @@ class Sync:
         wanted = {n['name'] for n in nics}
         for iface in vm.interfaces.filter(name__regex=r'^net\d+$').exclude(name__in=wanted):
             sync_ips(vm, iface, [], self.log)  # deleting the interface would delete its IPs
+            permit(iface, 'delete')
             record(f'− {_label(iface)}')
             iface.snapshot()
             iface.delete()
@@ -687,7 +717,10 @@ class Sync:
             changed |= apply(iface, **fields)
             old_mac = str(getattr(iface.primary_mac_address, 'mac_address', '') or '').lower()
             if nic['mac'] and old_mac != nic['mac']:
+                known = iface.mac_addresses.filter(mac_address=nic['mac']).exists()
+                permit(iface, 'change')
                 iface.set_primary_mac_address_from_value(nic['mac'])
+                permit(iface.primary_mac_address, 'change' if known else 'add')
                 record(f'{_label(iface)}: MAC {_fmt(old_mac)} → {nic["mac"]}')
                 changed = True
             ips = live.get(nic['mac'], []) if live is not None else (

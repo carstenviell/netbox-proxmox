@@ -38,8 +38,7 @@ def _usage(used, total):
 class ProxmoxObjectTable(NetBoxTable):
     actions = columns.ActionsColumn(actions=())  # read-only: no edit/delete views
     connection = tables.Column(linkify=True)
-    target = tables.Column(empty_values=(), orderable=False, verbose_name=_('NetBox object'),
-                           linkify=lambda record: record.target.get_absolute_url() if record.target else None)
+    target = tables.Column(empty_values=(), orderable=False, verbose_name=_('NetBox object'))
     state = tables.Column()
     changes = tables.Column(empty_values=(), orderable=False, verbose_name=_('Pending changes'))
     ignored = columns.BooleanColumn(verbose_name=_('Ignored'))
@@ -55,8 +54,19 @@ class ProxmoxObjectTable(NetBoxTable):
         default_columns = ('kind', 'proxmox_id', 'name', 'node', 'target', 'state', 'changes', 'cpu_usage',
                            'memory', 'last_seen', 'row_actions')
 
+    user = None
+
+    def configure(self, request):
+        self.user = request.user  # needed to hide objects/changes the user may not see
+        super().configure(request)
+
     def render_target(self, record):
-        return record.target or '—'
+        target = record.target
+        if target is None:
+            return '—'
+        if self.user is None or not type(target).objects.restrict(self.user, 'view').filter(pk=target.pk).exists():
+            return format_html('<span class="text-muted">{}</span>', _('(no access)'))
+        return format_html('<a href="{}">{}</a>', target.get_absolute_url(), target)
 
     def render_state(self, record):
         return format_html('<span class="badge text-bg-{}" title="{}">{}</span>',
@@ -66,6 +76,9 @@ class ProxmoxObjectTable(NetBoxTable):
         changes = record.changes or []
         if not changes:
             return '—'
+        # the change list names NetBox objects (hosts, IPs); it is only meant for those who decide on the sync
+        if self.user is None or not self.user.has_perm('netbox_proxmox.change_proxmoxobject'):
+            return format_html('<span class="text-muted">{}</span>', _('%(n)d change(s)') % {'n': len(changes)})
         # constant separator: format_html() without arguments raises TypeError since Django 6 (NetBox 4.7)
         shown = format_html_join(mark_safe('<br>'), '{}', ((c,) for c in changes[:SHOWN_CHANGES]))
         more = len(changes) - SHOWN_CHANGES

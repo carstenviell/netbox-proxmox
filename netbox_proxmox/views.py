@@ -21,6 +21,7 @@ from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.http import urlencode
 
 from dcim.filtersets import DeviceFilterSet
 from dcim.forms import DeviceFilterForm
@@ -131,7 +132,8 @@ def _selected(request, queryset, filterset):
     """pks of the ticked rows, or all filtered rows ("select all")."""
     if request.POST.get('_all'):
         return list(filterset(request.GET, queryset=queryset).qs.values_list('pk', flat=True))
-    return list(queryset.filter(pk__in=request.POST.getlist('pk')).values_list('pk', flat=True))
+    pks = [pk for pk in request.POST.getlist('pk') if pk.isdigit()]  # malformed values: ignore, no HTTP 500
+    return list(queryset.filter(pk__in=pks).values_list('pk', flat=True))
 
 
 # -- sync overview (Proxmox side) ------------------------------------------------------------
@@ -311,11 +313,12 @@ class OrphanAssignView(OrphanMixin, View):
             else:
                 messages.success(request, _('%(obj)s linked to %(name)s. Review the pending changes and sync.') % {
                     'obj': target, 'name': link.name})
-                return redirect(reverse('plugins:netbox_proxmox:proxmoxobject_list') + f'?q={link.proxmox_id}')
+                return redirect(reverse('plugins:netbox_proxmox:proxmoxobject_list') + '?' + urlencode({'q': link.proxmox_id}))
         return render(request, self.template_name, {'target': target, 'form': form})
 
 
 class OrphanToggleIgnoreView(OrphanMixin, View):
+    permission_required = ('netbox_proxmox.add_ignoredorphan', 'netbox_proxmox.delete_ignoredorphan')
     template_name = 'netbox_proxmox/confirm.html'
 
     def get(self, request, kind, pk):
@@ -337,6 +340,13 @@ class OrphanToggleIgnoreView(OrphanMixin, View):
 
 class OrphanBulkView(OrphanMixin, View):
     action = 'ignore'
+
+    def get_permission_required(self):
+        # ignoring creates IgnoredOrphan rows; decommissioning only changes the device/VM (checked per object)
+        return ('netbox_proxmox.add_ignoredorphan',) if self.action == 'ignore' else ()
+
+    def has_permission(self):
+        return self.request.user.is_authenticated and super().has_permission()
 
     def post(self, request, kind):
         if kind not in ORPHAN_MODELS:
