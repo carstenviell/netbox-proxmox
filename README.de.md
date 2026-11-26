@@ -65,7 +65,9 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
   Dienstbenutzer `proxmox-sync`, manuelle Läufe unter dem auslösenden Benutzer.
 - **Täglicher Lauf:** ruft alle aktiven Verbindungen ab und aktualisiert die **bereits verknüpften** Objekte mit
   ausstehenden Änderungen (CPU, RAM, Disks, Node, IPs, Auslastung). Neue Proxmox-Objekte werden **nie automatisch
-  angelegt**, sie warten in der Sync-Übersicht. Ignorierte Objekte werden nie geschrieben.
+  angelegt**, sie warten in der Sync-Übersicht. Ignorierte Objekte werden nie geschrieben. Von Hand verknüpfte
+  Objekte (*Zuordnen*, *Übernehmen*) müssen einmal per *Ausgewählte synchronisieren* (mit Rechteprüfung des
+  Benutzers) synchronisiert werden, bevor der tägliche Lauf sie aktuell hält.
 - Nur lesend: Das Plugin schreibt nie nach Proxmox.
 
 ## Voraussetzungen
@@ -76,21 +78,21 @@ Netzwerkkarten, MAC- und IP-Adressen und ein täglicher Auslastungs-Snapshot.
 ## Installation
 
 Das Plugin ist nicht auf PyPI veröffentlicht. Installiert wird es aus dem GitHub-Release-Archiv. Das funktioniert
-ohne `git`, auch im netbox-docker-Image. `v0.3.0` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
+ohne `git`, auch im netbox-docker-Image. `v0.3.1` durch das gewünschte [Release](https://github.com/carstenviell/netbox-proxmox/releases) ersetzen.
 
 **NetBox aus dem Quellcode (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz
 
 # Plugin bei NetBox-Upgrades behalten (upgrade.sh installiert local_requirements.txt neu)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** in `plugin_requirements.txt` eintragen
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz
 ```
 
 und in `Dockerfile-Plugins` (daraus `netbox`, `netbox-worker` und `netbox-housekeeping` über `docker-compose.override.yml` bauen):
@@ -190,7 +192,7 @@ Der System-Job läuft alle `sync_interval_min` Minuten (siehe *Täglicher Lauf* 
 | Verbindungen anlegen/ändern/löschen, Verbindung testen | **Superuser** (die Verbindung bestimmt, wohin das Token geht) |
 | Sync-Übersicht und Karten *Proxmox* ansehen | `netbox_proxmox.view_proxmoxobject` (verknüpfte NetBox-Objekte nur mit `view` daran; die Liste der ausstehenden Änderungen nur mit `change_proxmoxobject`) |
 | Abrufen, Zuordnen, Ignorieren | `netbox_proxmox.change_proxmoxobject` |
-| Ausgewählte synchronisieren | `netbox_proxmox.change_proxmoxobject`, dazu `add`/`change`/`delete` an **jedem Objekt, das der Abgleich berührt**: Gerät/VM, VM-Interfaces, virtuelle Disks, IP-Adressen, MAC-Adressen und, falls neu, Tags, Plattformen, Cluster-Typ und Cluster. Constraints greifen (z. B. IPs nur in bestimmten VRFs). Ein fehlendes Recht rollt das ganze Objekt zurück und zeigt *Fehler* mit Grund. Der tägliche Lauf ist nicht betroffen. |
+| Ausgewählte synchronisieren | `netbox_proxmox.change_proxmoxobject`, dazu `add`/`change`/`delete` an **jedem Objekt, das der Abgleich berührt**: Gerät/VM, VM-Interfaces, virtuelle Disks, IP-Adressen, MAC-Adressen und, falls neu, Tags, Plattformen, Cluster-Typ und Cluster. Constraints greifen (z. B. IPs nur in bestimmten VRFs). Ein fehlendes Recht rollt das ganze Objekt zurück und zeigt *Fehler* mit Grund. Der tägliche Lauf schreibt nur Objekte, die einmal so synchronisiert (oder automatisch per exaktem Namen verknüpft) wurden. |
 | Orphans ignorieren | `netbox_proxmox.add_ignoredorphan` und `delete_ignoredorphan` |
 | Orphans außer Betrieb setzen | `change` am Gerät bzw. an der VM |
 

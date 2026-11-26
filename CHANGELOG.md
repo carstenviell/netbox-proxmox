@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.3.1] – 2026-11-26
+### Security
+- The daily run no longer writes objects that were linked by hand (*Assign*, *Accept*) and never synced manually. Before, a user who may only change the VM could link it, and the next daily run (which has no permission checks) wrote everything – including deleting interfaces/disks, IP addresses and moving it to the Proxmox cluster. Such objects now have to be synced once with *Sync selected*, which checks the user's permissions on every touched object. Objects linked automatically by exact name and objects that were already synced stay in the daily run (migration `0006` keeps existing links).
+- The *Accept* confirmation shows cluster and tenant of the suggested object and warns when it belongs to another cluster and would be moved by the sync.
+
 ## [0.3.0] – 2026-11-26
 ### Added
 - **Name suggestions:** if a Proxmox VM/container/node has no exact name match but exactly one unlinked NetBox object

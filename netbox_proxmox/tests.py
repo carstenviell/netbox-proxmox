@@ -12,13 +12,13 @@ from ipam.models import IPAddress
 from tenancy.models import Tenant
 from users.models import User
 from extras.models import Tag
-from virtualization.models import Cluster, ClusterType, VirtualMachine
+from virtualization.models import Cluster, ClusterType, VirtualMachine, VMInterface
 
 from .client import ProxmoxClient, ProxmoxError
 from .custom_fields import CF_VMID, ensure_custom_fields
 from .jobs import changelog_context
 from .models import IgnoredOrphan, ProxmoxConnection, ProxmoxObject
-from .sync import (TAG_MARKER, Sync, agent_ips, assign, discover, parse_disks, parse_nics, reject_suggestion, size_mb,
+from .sync import (TAG_MARKER, Sync, agent_ips, assign, daily_links, discover, parse_disks, parse_nics, reject_suggestion, size_mb,
                    storage_usage)
 
 LOG = logging.getLogger('netbox_proxmox.tests')
@@ -389,7 +389,7 @@ class SyncTests(TestCase):
         self.api[('nodes', 'pve2', 'lxc', 300, 'config')] = {'ostype': 'debian'}
         self.fetch()
         with changelog_context(None):  # like the system job
-            Sync(self.conn, LOG).write(list(self.conn.proxmox_objects.filter(state='pending', ignored=False)))
+            Sync(self.conn, LOG).write(list(daily_links(self.conn)))
         self.assertEqual(VirtualMachine.objects.get(name='web01').memory, 8192)
         self.assertFalse(VirtualMachine.objects.filter(name='new-ct').exists())
         self.assertEqual(self.link(300).state, 'new')
@@ -632,6 +632,55 @@ class ActionViewTests(TestCase):
         link = ProxmoxObject.objects.get(pk=pk_ct)
         self.assertEqual((link.state, link.suggested_pk, link.rejected_pks), ('new', None, [ct.pk]))
         self.assertEqual(self.client.post(f'/plugins/proxmox/sync/{pk_ct}/reject/').status_code, 404)
+
+    def test_daily_run_skips_hand_linked_until_synced_manually(self):  # MEDIUM-04
+        vm = VirtualMachine.objects.create(name='WEB01', site=SyncTests.site)
+        keep = VMInterface.objects.create(virtual_machine=vm, name='net7')  # the sync would remove it
+        discover(self.conn, FakeClient(copy.deepcopy(API)), LOG)
+        grant(self.user, VirtualMachine, ['view', 'change'])  # nothing on interfaces, IPAM, disks, cluster type
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        self.client.post(f'/plugins/proxmox/sync/{pk}/accept/')
+        link = ProxmoxObject.objects.get(pk=pk)
+        self.assertEqual((link.virtual_machine, link.state, link.synced), (vm, 'pending', False))
+        self.assertNotIn(link, daily_links(self.conn))
+        with changelog_context(None):  # what the daily job does
+            Sync(self.conn, LOG).write(list(daily_links(self.conn)))
+        vm.refresh_from_db()
+        self.assertEqual(vm.name, 'WEB01')
+        self.assertTrue(VMInterface.objects.filter(pk=keep.pk).exists())
+        # the user's own manual sync is refused by the permission checks and stays untrusted
+        with changelog_context(self.user):
+            Sync(self.conn, LOG, user=self.user).write([link])
+        link.refresh_from_db()
+        self.assertEqual((link.state, link.synced), ('error', False))
+        # a manual sync with sufficient rights makes it trusted for the daily run
+        admin = User.objects.create_user(username='adm4', is_superuser=True)
+        with changelog_context(admin):
+            Sync(self.conn, LOG, user=admin).write(list(ProxmoxObject.objects.filter(kind='node', connection=self.conn)) + [link])
+        link.refresh_from_db()
+        self.assertEqual((link.state, link.synced), ('ok', True))
+        assign(link, VirtualMachine.objects.create(name='other', site=SyncTests.site), LOG)  # re-assign: untrusted
+        link.refresh_from_db()
+        self.assertFalse(link.synced)
+
+    def test_auto_linked_exact_name_is_trusted(self):
+        VirtualMachine.objects.create(name='ct01', site=SyncTests.site)
+        discover(self.conn, FakeClient(copy.deepcopy(API)), LOG)
+        link = ProxmoxObject.objects.get(proxmox_id='200')
+        self.assertTrue(link.synced)
+        self.assertIn(link, daily_links(self.conn))
+
+    def test_accept_page_shows_cluster_and_warns(self):  # LOW-06
+        other = Cluster.objects.create(name='vmware', type=ClusterType.objects.create(name='VMware', slug='vmware'))
+        tenant = Tenant.objects.create(name='Finance', slug='finance')
+        VirtualMachine.objects.create(name='web01', cluster=other, tenant=tenant)
+        discover(self.conn, FakeClient(copy.deepcopy(API)), LOG)
+        grant(self.user, VirtualMachine, ['view', 'change'])
+        pk = ProxmoxObject.objects.get(proxmox_id='101').pk
+        page = self.client.get(f'/plugins/proxmox/sync/{pk}/accept/')
+        self.assertContains(page, 'alert-warning')
+        self.assertContains(page, 'vmware')
+        self.assertContains(page, 'Finance')
 
     def test_actions_require_permission(self):
         nobody = User.objects.create_user(username='nobody')

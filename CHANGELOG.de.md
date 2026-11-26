@@ -6,6 +6,11 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Ve
 
 ## [Unveröffentlicht]
 
+## [0.3.1] – 2026-11-26
+### Sicherheit
+- Der tägliche Lauf schreibt keine Objekte mehr, die von Hand verknüpft (*Zuordnen*, *Übernehmen*) und nie manuell synchronisiert wurden. Bisher konnte ein Benutzer, der nur die VM ändern darf, sie verknüpfen, und der nächste tägliche Lauf (ohne Rechteprüfung) schrieb alles – einschließlich Löschen von Interfaces/Disks, IP-Adressen und Verschieben in den Proxmox-Cluster. Solche Objekte müssen jetzt einmal per *Ausgewählte synchronisieren* abgeglichen werden, das die Rechte des Benutzers an jedem berührten Objekt prüft. Automatisch per exaktem Namen verknüpfte und bereits synchronisierte Objekte bleiben im täglichen Lauf (Migration `0006` übernimmt vorhandene Verknüpfungen).
+- Die Bestätigung für *Übernehmen* nennt Cluster und Mandant des vorgeschlagenen Objekts und warnt, wenn es in einem anderen Cluster liegt und beim Sync verschoben würde.
+
 ## [0.3.0] – 2026-11-26
 ### Neu
 - **Namensvorschläge:** Hat eine Proxmox-VM, ein Container oder ein Node keinen exakten Namenstreffer, aber genau ein

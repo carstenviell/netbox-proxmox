@@ -59,7 +59,8 @@ MAC and IP addresses and a daily usage snapshot.
   `proxmox-sync`, manual runs the user who started them.
 - **Daily run:** fetches all enabled connections and updates the **already linked** objects with pending changes
   (CPU, memory, disks, node, IPs, usage). New Proxmox objects are **never created automatically** – they wait in
-  the sync overview. Ignored objects are never written.
+  the sync overview. Ignored objects are never written. Objects linked by hand (*Assign*, *Accept*) must be synced
+  once with *Sync selected* (with the user's permission checks) before the daily run keeps them up to date.
 - Read-only: the plugin never writes to Proxmox.
 
 ## Requirements
@@ -70,21 +71,21 @@ MAC and IP addresses and a daily usage snapshot.
 ## Installation
 
 The plugin is not published on PyPI. Install it from the GitHub release archive – this works without `git`,
-also in the netbox-docker image. Replace `v0.3.0` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
+also in the netbox-docker image. Replace `v0.3.1` with the [release](https://github.com/carstenviell/netbox-proxmox/releases) you want.
 
 **NetBox installed from source (systemd):**
 
 ```bash
-sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz
+sudo /opt/netbox/venv/bin/pip install https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz
 
 # keep the plugin when NetBox is upgraded (upgrade.sh reinstalls local_requirements.txt)
-echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
+echo "https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz" | sudo tee -a /opt/netbox/local_requirements.txt
 ```
 
 **netbox-docker:** add to `plugin_requirements.txt`
 
 ```text
-https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.0.tar.gz
+https://github.com/carstenviell/netbox-proxmox/archive/refs/tags/v0.3.1.tar.gz
 ```
 
 and to `Dockerfile-Plugins` (build `netbox`, `netbox-worker` and `netbox-housekeeping` from it via `docker-compose.override.yml`):
@@ -179,7 +180,7 @@ The system job runs every `sync_interval_min` minutes (see *Daily run* above).
 | Add/edit/delete connections, test connection | **Superuser** (the connection decides where the token is sent) |
 | View sync overview and *Proxmox* cards | `netbox_proxmox.view_proxmoxobject` (linked NetBox objects are only shown with `view` on them; the list of pending changes only with `change_proxmoxobject`) |
 | Fetch, assign, ignore | `netbox_proxmox.change_proxmoxobject` |
-| Sync selected | `netbox_proxmox.change_proxmoxobject`, plus `add`/`change`/`delete` on **every object the sync touches**: device/VM, VM interfaces, virtual disks, IP addresses, MAC addresses and – when they are new – tags, platforms, cluster type and cluster. Constraints apply (e.g. IPs only in certain VRFs). A missing permission rolls back the whole object and shows *Error* with the reason. The daily run is not affected. |
+| Sync selected | `netbox_proxmox.change_proxmoxobject`, plus `add`/`change`/`delete` on **every object the sync touches**: device/VM, VM interfaces, virtual disks, IP addresses, MAC addresses and – when they are new – tags, platforms, cluster type and cluster. Constraints apply (e.g. IPs only in certain VRFs). A missing permission rolls back the whole object and shows *Error* with the reason. The daily run only writes objects that were synced this way once (or linked automatically by exact name). |
 | Ignore orphans | `netbox_proxmox.add_ignoredorphan` and `delete_ignoredorphan` |
 | Decommission orphans | `change` on the device/VM |
 

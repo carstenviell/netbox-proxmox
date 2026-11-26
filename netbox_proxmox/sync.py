@@ -446,6 +446,7 @@ class Sync:
             obj, ambiguous = match(link, self.match_queryset(kind), name, self.narrow(kind))
             if obj is not None:  # unique name match: link right away, NetBox itself is not changed here
                 setattr(link, 'device' if kind == 'node' else 'virtual_machine', obj)
+                link.synced = True  # system decision within this cluster's scope (exact name)
                 self.logger.info(_('%(name)s linked to the existing NetBox object by name.') % {'name': name})
             elif not ambiguous:
                 link.suggested_pk = suggest(self.suggest_queryset(kind), name, link.rejected_pks)
@@ -562,7 +563,7 @@ class Sync:
                 self.counts['error'] += 1
                 self.logger.error(f'{link.kind} {link.proxmox_id} ({link.name}): {message}')
                 continue
-            ProxmoxObject.objects.filter(pk=link.pk).update(state='ok', changes=[], message='')
+            ProxmoxObject.objects.filter(pk=link.pk).update(state='ok', changes=[], message='', synced=True)
             self.counts[result] += 1
         return dict(self.counts)
 
@@ -764,6 +765,12 @@ def discover(conn, client, logger):
     return Sync(conn, logger, client=client).discover()
 
 
+def daily_links(conn):
+    """What the daily system run (no permission checks) may write: linked objects with pending changes whose link
+    the system trusts. Manually assigned/accepted links wait for a manual sync (MEDIUM-04)."""
+    return conn.proxmox_objects.filter(state='pending', ignored=False, synced=True)
+
+
 def write_objects(links, logger, user=None):
     """Apply the fetched data of the given ProxmoxObjects. user=None: system run without permission checks."""
     counts = Counter()
@@ -788,6 +795,7 @@ def assign(link, target, logger):
         raise ValidationError(_('%(obj)s is already linked to %(other)s.') % {'obj': target, 'other': other})
     setattr(link, field, target)
     link.suggested_pk = None
+    link.synced = False  # MEDIUM-04: first write only via "Sync selected" with the user's permission checks
     link.save()
     return Sync(link.connection, logger).evaluate(link)
 

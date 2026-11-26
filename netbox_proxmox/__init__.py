@@ -6,7 +6,7 @@ class ProxmoxConfig(PluginConfig):
     name = 'netbox_proxmox'
     verbose_name = 'Proxmox'
     description = 'Import and sync Proxmox VE clusters, nodes, VMs and LXC containers (disks, interfaces, MAC/IP, utilization).'
-    version = '0.3.0'
+    version = '0.3.1'
     author = 'Carsten Viell'
     base_url = 'proxmox'
     min_version = '4.7.0'

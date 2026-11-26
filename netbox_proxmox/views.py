@@ -267,13 +267,21 @@ class SuggestionView(LinkMixin, View):
     def get(self, request, pk):
         link = self.link(request, pk)
         obj = self.suggested(request, link)
-        question = _('Link %(name)s to %(obj)s? The pending changes (e.g. name and cluster from Proxmox) are shown '
-                     'in the sync overview and written when you sync the object.') if self.accept else \
+        question = _('Link %(name)s to %(obj)s (cluster: %(cluster)s, tenant: %(tenant)s)? The pending changes are '
+                     'shown in the sync overview and written when you sync the object yourself.') if self.accept else \
             _('Reject %(obj)s as suggestion for %(name)s? It will not be suggested again; syncing %(name)s then '
               'creates a new NetBox object.')
-        return render(request, self.template_name, {
-            'question': question % {'name': link.name, 'obj': obj},
-            'return_url': _return_url(request, 'plugins:netbox_proxmox:proxmoxobject_list')})
+        none = _('none')
+        context = {
+            'question': question % {'name': link.name, 'obj': obj, 'cluster': obj.cluster or none,
+                                    'tenant': obj.tenant or none},
+            'return_url': _return_url(request, 'plugins:netbox_proxmox:proxmoxobject_list')}
+        cluster = link.connection.cluster
+        if self.accept and obj.cluster_id and obj.cluster_id != getattr(cluster, 'pk', None):  # LOW-06
+            context['warning'] = _('%(obj)s belongs to cluster %(cluster)s. Syncing moves it to the Proxmox cluster '
+                                   '%(proxmox)s and replaces its interfaces and disks with those from Proxmox.') % {
+                'obj': obj, 'cluster': obj.cluster, 'proxmox': cluster or link.connection}
+        return render(request, self.template_name, context)
 
     def post(self, request, pk):
         link = self.link(request, pk)

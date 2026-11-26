@@ -115,6 +115,9 @@ class ProxmoxObject(models.Model):
     suggested_pk = models.PositiveIntegerField(verbose_name=_('suggested object'), null=True, blank=True,
                                                editable=False)
     rejected_pks = models.JSONField(verbose_name=_('rejected suggestions'), default=list, blank=True, editable=False)
+    # only links the system trusts are written by the daily run (no permission checks there): linked by exact name
+    # in this cluster, or written once by a manual sync with permission checks. Manually assigned/accepted: False.
+    synced = models.BooleanField(verbose_name=_('trusted for the daily run'), default=False, editable=False)
 
     # Usage snapshot from the last sync (bytes / percent / seconds)
     cpu_usage = models.FloatField(verbose_name=_('CPU usage (%)'), null=True, blank=True)

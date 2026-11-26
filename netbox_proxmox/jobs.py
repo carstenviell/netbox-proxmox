@@ -8,7 +8,7 @@ from utilities.request import NetBoxFakeRequest
 
 from .client import ProxmoxClient, ProxmoxError
 from .models import ProxmoxConnection, ProxmoxObject
-from .sync import Sync, discover, write_objects
+from .sync import Sync, daily_links, discover, write_objects
 
 SERVICE_USER = 'proxmox-sync'
 
@@ -61,7 +61,7 @@ class ProxmoxSyncJob(JobRunner):
             self.logger.info(f'{conn} fetched: ' + ', '.join(f'{k} {v}' for k, v in sorted(counts.items())))
             if mode == 'fetch':
                 continue
-            linked = conn.proxmox_objects.filter(state='pending', ignored=False)
+            linked = daily_links(conn)
             with changelog_context(None):  # system run: service user, no permission checks
                 sync = Sync(conn, self.logger)
                 counts = sync.write(list(linked))
